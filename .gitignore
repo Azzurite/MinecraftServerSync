@@ -1,6 +1,6 @@
-config.properties
-MinecraftServerSync.log
-nativelog.txt
+/config.properties
+/MinecraftServerSync.log
+/nativelog.txt
 
 # Created by https://www.gitignore.io
 
