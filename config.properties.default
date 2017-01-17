@@ -1,0 +1,20 @@
+# MAKE SURE TO USE FORWARD SLASHES IN ALL PATHS!
+
+# Set this to the desired path you want to save your server files in, then uncomment by removing the hash in front of the line.
+# Will default to %APPDATA%/.minecraft/server
+
+base.path=C:/DESIRED/SERVER/PATH/
+
+
+# The program will automatically start your minecraft launcher if this path is set to the MinecraftLauncher.exe. Set your path then uncomment by removing the hash in front of the line.
+
+launcher.path=C:/MINECRAFT/LAUNCHER/PATH/MinecraftLauncher.exe
+
+
+# Set FTP settings here
+ftp.hostname=
+ftp.port=
+ftp.username=
+ftp.password=
+# where the server files should reside in
+ftp.base.directory=
