@@ -1,12 +1,12 @@
 package name.azzurite.mcserver.minecraft;
 
-import java.util.HashMap;
 import java.util.Map;
 
-import org.jnbt.ByteTag;
-import org.jnbt.CompoundTag;
-import org.jnbt.StringTag;
-import org.jnbt.Tag;
+import com.flowpowered.nbt.ByteTag;
+import com.flowpowered.nbt.CompoundMap;
+import com.flowpowered.nbt.CompoundTag;
+import com.flowpowered.nbt.StringTag;
+import com.flowpowered.nbt.Tag;
 
 class ServerListEntry {
 
@@ -35,7 +35,7 @@ class ServerListEntry {
 		this.ip = ip;
 	}
 
-	ServerListEntry(Map<String, Tag> tagData) {
+	ServerListEntry(Map<String, Tag<?>> tagData) {
 		if (tagData.containsKey(NAME_KEY)) {
 			name = ((StringTag) tagData.get(NAME_KEY)).getValue();
 		}
@@ -93,8 +93,8 @@ class ServerListEntry {
 		this.acceptTextures = acceptTextures;
 	}
 
-	public Tag toTag() {
-		Map<String, Tag> map = new HashMap<>();
+	public CompoundTag toTag() {
+		CompoundMap map = new CompoundMap();
 		if (name != null) {
 			map.put(NAME_KEY, new StringTag(NAME_KEY, name));
 		}
