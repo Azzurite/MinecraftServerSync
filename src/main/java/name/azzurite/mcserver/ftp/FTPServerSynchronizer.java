@@ -39,7 +39,7 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 	private static final Logger LOGGER = LoggerFactory.getLogger(FTPServerSynchronizer.class);
 	private static final String SERVER_IP_FILE = "runningServer";
 	private static final Map<String, List<String>> ZIP_FILES = new HashMap<>();
-	private static final String UPLOAD_IN_PROGRESS_FILE_NAME = "uploadInProgress";
+    private static final String SAVE_IN_PROGRESS_FILE_NAME = "uploadInProgress";
 	private static final long SECONDS_10 = 10000L;
 
 	static {
@@ -185,7 +185,7 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 	}
 
 	private boolean isUploadInProgress() {
-		return Boolean.parseBoolean(ftpClient.retrieveFileContents(UPLOAD_IN_PROGRESS_FILE_NAME));
+		return Boolean.parseBoolean(ftpClient.retrieveFileContents(SAVE_IN_PROGRESS_FILE_NAME));
 	}
 
 	private Path downloadFile(String fileName) {
@@ -197,8 +197,10 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 
 	@Override
 	public void saveFiles() throws IOException {
+		ftpClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true));
 		List<Path> paths = zipFiles(ZIP_FILES);
 		uploadFiles(paths);
+		ftpClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false));
 		LOGGER.info("All server files synchronized!");
 	}
 
@@ -230,14 +232,12 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 	}
 
 	private void uploadFiles(Iterable<Path> paths) {
-		ftpClient.setFileContents(UPLOAD_IN_PROGRESS_FILE_NAME, String.valueOf(true));
 		paths.forEach((path) -> {
 			LOGGER.info("Uploading file '{}' to server", path);
 			LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
 			ftpClient.uploadFile(path);
 			LOGGER.info("Upload finished");
 		});
-		ftpClient.setFileContents(UPLOAD_IN_PROGRESS_FILE_NAME, String.valueOf(false));
 	}
 
 	private static class OnlyContentZipEntrySource implements ZipEntrySource {
