@@ -5,5 +5,5 @@ import java.io.IOException;
 @FunctionalInterface
 interface FTPAction<R> {
 
-    R perform() throws IOException;
+	R perform() throws IOException;
 }

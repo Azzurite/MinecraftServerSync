@@ -5,14 +5,14 @@ import java.util.Optional;
 
 public interface ServerSynchronizer {
 
-    void setServerIp(String ip) throws IOException;
+	Optional<String> getServerIp() throws IOException;
 
-    Optional<String> getServerIp() throws IOException;
+	void setServerIp(String ip) throws IOException;
 
-    void retrieveFiles() throws IOException;
+	void retrieveFiles() throws IOException;
 
-    void saveFiles() throws IOException;
+	void saveFiles() throws IOException;
 
-    void deleteServerIp() throws IOException;
+	void deleteServerIp() throws IOException;
 
 }
