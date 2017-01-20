@@ -11,39 +11,46 @@ import java.util.Arrays;
 import java.util.Optional;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.sync.SyncClient;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.net.ftp.FTP;
-import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPConnectionClosedException;
 import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class AutoFTPClient {
+public class FTPSyncClient implements SyncClient {
 
 	private static final int MAX_RETRIES = 3;
 
 	private static final int BUF_SIZE = 1048576;
 
-	private static final Logger LOGGER = LoggerFactory.getLogger(AutoFTPClient.class);
+	private static final Logger LOGGER = LoggerFactory.getLogger(FTPSyncClient.class);
 
-	private final FTPClient ftpClient = new FTPClient();
+	private final org.apache.commons.net.ftp.FTPClient ftpClient = new org.apache.commons.net.ftp.FTPClient();
 
 	private final AppConfig appConfig;
 
-	AutoFTPClient(AppConfig appConfig) {
+
+	public FTPSyncClient(AppConfig appConfig) {
 		ftpClient.setBufferSize(BUF_SIZE);
 		this.appConfig = appConfig;
 	}
 
-	private static void logFtpCommand(FTPClient ftp, String commandName, Object... arguments) {
+	public static void main(String[] args) {
+		AppConfig appConfig = AppConfig.readConfig();
+		SyncClient ftpClient = new FTPSyncClient(appConfig);
+		ftpClient.downloadFile("map.zip");
+	}
+
+	private static void logFtpCommand(org.apache.commons.net.ftp.FTPClient ftp, String commandName, Object... arguments) {
 		logCommand(commandName, arguments);
 		logResult(ftp);
 	}
 
-	private static void logResult(FTPClient ftp) {
+	private static void logResult(org.apache.commons.net.ftp.FTPClient ftp) {
 		LOGGER.trace("Result: {}", ftp.getReplyString());
 	}
 
@@ -125,6 +132,7 @@ class AutoFTPClient {
 		}, ftpClient::disconnect);
 	}
 
+	@Override
 	public String retrieveFileContents(String file) {
 		LOGGER.debug("Retrieving file contents for file '{}'", file);
 
@@ -158,6 +166,7 @@ class AutoFTPClient {
 		});
 	}
 
+	@Override
 	public void setFileContents(String file, String contents) {
 		LOGGER.debug("Setting file({}) contents: {}", file, contents);
 
@@ -167,6 +176,7 @@ class AutoFTPClient {
 		});
 	}
 
+	@Override
 	public void deleteFile(String file) {
 		LOGGER.debug("Deleting file: {}", file);
 
@@ -176,6 +186,7 @@ class AutoFTPClient {
 		});
 	}
 
+	@Override
 	public void uploadFile(Path path) {
 		LOGGER.debug("Uploading file: {}", path);
 
@@ -203,6 +214,7 @@ class AutoFTPClient {
 		});
 	}
 
+	@Override
 	public boolean doesFileExist(String file) {
 		LOGGER.debug("Checking file existence: {}", file);
 
@@ -214,6 +226,7 @@ class AutoFTPClient {
 		});
 	}
 
+	@Override
 	public Path downloadFile(String fileName) {
 		LOGGER.debug("Downloading file {}", fileName);
 

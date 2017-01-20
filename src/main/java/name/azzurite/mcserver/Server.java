@@ -9,6 +9,7 @@ import java.net.URL;
 import java.util.Optional;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.sync.ServerSynchronizer;
 import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

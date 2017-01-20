@@ -10,8 +10,10 @@ import java.nio.file.Paths;
 import java.util.Optional;
 
 import name.azzurite.mcserver.config.AppConfig;
-import name.azzurite.mcserver.ftp.FTPServerSynchronizer;
+import name.azzurite.mcserver.ftp.FTPSyncClient;
 import name.azzurite.mcserver.minecraft.ServerList;
+import name.azzurite.mcserver.sync.ServerSynchronizer;
+import name.azzurite.mcserver.sync.SyncClient;
 import name.azzurite.mcserver.updates.UpdateChecker;
 import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
@@ -34,7 +36,8 @@ public class Main {
 
 			createNecessaryDirectories(appConfig);
 
-			FTPServerSynchronizer sync = new FTPServerSynchronizer(appConfig);
+			SyncClient syncClient = new FTPSyncClient(appConfig);
+			ServerSynchronizer sync = new ServerSynchronizer(appConfig, syncClient);
 
 			try (Server server = new Server(appConfig, sync)) {
 				ServerList.addOrReplace(server);
