@@ -191,7 +191,8 @@ public class ServerSynchronizer {
 
 	private Path downloadFile(String fileName) throws ExecutionException {
 		LOGGER.info("Downloading file '{}'...", fileName);
-		Future<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+		SyncActionFuture<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+		new ProgressLogger(downloadedFileResult).logProgress();
 		Path downloadedFile = AsyncUtil.getResult(downloadedFileResult);
 		LOGGER.info("Download finished");
 		return downloadedFile;
@@ -236,7 +237,8 @@ public class ServerSynchronizer {
 		paths.forEach((path) -> {
 			LOGGER.info("Uploading file '{}' to server", path);
 			LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
-			syncClient.uploadFile(path);
+			SyncActionFuture<Void> future = syncClient.uploadFile(path);
+			new ProgressLogger(future).logProgress();
 			LOGGER.info("Upload finished");
 		});
 	}

@@ -15,12 +15,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.sync.NoProgressSyncActionFuture;
+import name.azzurite.mcserver.sync.SyncActionFuture;
 import name.azzurite.mcserver.sync.SyncClient;
 import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.net.ftp.FTP;
+import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPConnectionClosedException;
 import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
@@ -34,16 +37,19 @@ public class FTPSyncClient implements SyncClient {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(FTPSyncClient.class);
 
-	private final org.apache.commons.net.ftp.FTPClient ftpClient = new org.apache.commons.net.ftp.FTPClient();
+	private final FTPClient ftpClient = new FTPClient();
 
 	private final AppConfig appConfig;
 
-
 	private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+	private final FTPTransferProgressListener progressListener;
 
 	public FTPSyncClient(AppConfig appConfig) {
 		ftpClient.setBufferSize(BUF_SIZE);
 		this.appConfig = appConfig;
+		progressListener = new FTPTransferProgressListener();
+		ftpClient.setCopyStreamListener(progressListener);
 	}
 
 	public static void main(String[] args) {
@@ -52,12 +58,12 @@ public class FTPSyncClient implements SyncClient {
 		ftpClient.downloadFile("map.zip");
 	}
 
-	private static void logFtpCommand(org.apache.commons.net.ftp.FTPClient ftp, String commandName, Object... arguments) {
+	private static void logFtpCommand(FTPClient ftp, String commandName, Object... arguments) {
 		logCommand(commandName, arguments);
 		logResult(ftp);
 	}
 
-	private static void logResult(org.apache.commons.net.ftp.FTPClient ftp) {
+	private static void logResult(FTPClient ftp) {
 		LOGGER.trace("Result: {}", ftp.getReplyString());
 	}
 
@@ -142,10 +148,10 @@ public class FTPSyncClient implements SyncClient {
 	}
 
 	@Override
-	public Future<String> retrieveFileContents(String file) {
+	public SyncActionFuture<String> retrieveFileContents(String file) {
 		LOGGER.debug("Retrieving file contents for file '{}'", file);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " content retrieval", perform(() -> {
 			try (ByteArrayOutputStream temp = new ByteArrayOutputStream()) {
 				ftpClient.retrieveFile(file, temp);
 				logFtpCommand(ftpClient, "downloadFile", file);
@@ -156,7 +162,7 @@ public class FTPSyncClient implements SyncClient {
 
 				return fileContents;
 			}
-		});
+		}));
 	}
 
 	private Future<byte[]> retrieveByteFileContents(String file) {
@@ -176,34 +182,33 @@ public class FTPSyncClient implements SyncClient {
 	}
 
 	@Override
-	public Future<Void> setFileContents(String file, String contents) {
+	public SyncActionFuture<Void> setFileContents(String file, String contents) {
 		LOGGER.debug("Setting file({}) contents: {}", file, contents);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " set content", perform(() -> {
 			ftpClient.storeFile(file, IOUtils.toInputStream(contents, "UTF-8"));
 			logFtpCommand(ftpClient, "storeFile", file, contents);
-		});
+		}));
 	}
 
 	@Override
-	public Future<Void> deleteFile(String file) {
+	public SyncActionFuture<Void> deleteFile(String file) {
 		LOGGER.debug("Deleting file: {}", file);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " deletion", perform(() -> {
 			ftpClient.deleteFile(file);
 			logFtpCommand(ftpClient, "deleteFile", file);
-		});
+		}));
 	}
 
 	@Override
-	public Future<Void> uploadFile(Path path) {
+	public SyncActionFuture<Void> uploadFile(Path path) {
 		LOGGER.debug("Uploading file: {}", path);
 
 		String fileName = path.getFileName().toString();
 		String md5FileName = generateMd5FileName(fileName);
 
-		return perform(() -> {
-
+		Future<Void> uploadResult = perform(() -> {
 			try {
 				byte[] remoteMd5 = new byte[0];
 				remoteMd5 = AsyncUtil.getResult(retrieveByteFileContents(md5FileName));
@@ -225,25 +230,27 @@ public class FTPSyncClient implements SyncClient {
 				throw new FTPException(e);
 			}
 		});
+		long fileSize = getFileSize(fileName);
+		return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, fileName + " upload", fileSize);
 	}
 
 	@Override
-	public Future<Boolean> doesFileExist(String file) {
+	public SyncActionFuture<Boolean> doesFileExist(String file) {
 		LOGGER.debug("Checking file existence: {}", file);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " existance check", perform(() -> {
 			FTPFile[] ftpFiles = ftpClient.listFiles(file);
 			logFtpCommand(ftpClient, "listFiles", file);
 
 			return ftpFiles.length > 0;
-		});
+		}));
 	}
 
 	@Override
-	public Future<Path> downloadFile(String fileName) {
+	public SyncActionFuture<Path> downloadFile(String fileName) {
 		LOGGER.debug("Downloading file {}", fileName);
 
-		return perform(() -> {
+		Future<Path> downloadResult = perform(() -> {
 			Path localPath = appConfig.getSyncPath().resolve(fileName);
 
 			try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream()) {
@@ -266,6 +273,8 @@ public class FTPSyncClient implements SyncClient {
 
 			return localPath;
 		});
+		long fileSize = getFileSize(fileName);
+		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, fileName + " download", fileSize);
 	}
 
 	private <R> Future<R> retry(FTPAction<R> action, FTPVoidAction onFail) {
@@ -336,5 +345,22 @@ public class FTPSyncClient implements SyncClient {
 		});
 	}
 
+	private long getFileSize(String fileName) {
+		Future<Long> fileSizeResult = perform(() -> {
+			long fileSize = 0;
+			FTPFile[] files = ftpClient.listFiles(fileName);
+			if (files.length != 1 || !files[0].isFile()) {
+				throw new FTPException("Could not get size of file " + fileName);
+			}
+			return files[0].getSize();
+		});
+
+		try {
+			return AsyncUtil.getResult(fileSizeResult);
+		} catch (ExecutionException e) {
+			throw new FTPException(e);
+		}
+
+	}
 
 }

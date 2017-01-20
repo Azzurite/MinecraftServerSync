@@ -10,8 +10,8 @@ public final class AsyncUtil {
 	public  static <R> R getResult(Future<R> future) throws ExecutionException {
 		try {
 			return future.get();
-		} catch (InterruptedException ignored) {
-			return null;
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
 		}
 	}
 
