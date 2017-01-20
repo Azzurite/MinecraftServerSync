@@ -2,6 +2,7 @@ package name.azzurite.mcserver.config;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -9,6 +10,7 @@ import java.util.Optional;
 import java.util.Properties;
 
 import name.azzurite.mcserver.util.LogUtil;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,15 +34,18 @@ public final class AppConfig {
 	private static final String FTP_PASSWORD_PROPERTY = "ftp.password";
 
 	private static final String FTP_BASE_DIRECTORY_PROPERTY = "ftp.base.directory";
+	private static final String VERSION_RESOURCE_NAME = "version.txt";
+	private static final String VERSION_PROPERTY = "version";
 
 	private final Properties config;
 
 	private AppConfig() {
-		config = createDefaultConfig();
+		this(createDefaultConfig());
 	}
 
 	private AppConfig(Properties properties) {
 		config = new Properties(properties);
+		config.setProperty(VERSION_PROPERTY, readVersion());
 	}
 
 	public static AppConfig readConfig() {
@@ -64,6 +69,20 @@ public final class AppConfig {
 
 	public static Path getDefaultMinecraftPath() {
 		return Paths.get(System.getenv("APPDATA"), ".minecraft");
+	}
+
+	private String readVersion() {
+		try {
+			InputStream versionInputStream = getClass().getClassLoader().getResourceAsStream(VERSION_RESOURCE_NAME);
+			return IOUtils.toString(versionInputStream, "UTF-8");
+		} catch (IOException e) {
+			LOGGER.error("Problem reading version from classpath.");
+			throw new IllegalStateException(e);
+		}
+	}
+
+	public Version getAppVersion() {
+		return new Version(config.getProperty(VERSION_PROPERTY));
 	}
 
 	public Path getBaseServerPath() {
