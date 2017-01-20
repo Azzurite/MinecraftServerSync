@@ -1,4 +1,4 @@
-package name.azzurite.mcserver.ftp;
+package name.azzurite.mcserver.sync;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -19,11 +19,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 
-import name.azzurite.mcserver.ServerSynchronizer;
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.ftp.FTPSyncClient;
+import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -34,12 +38,12 @@ import org.zeroturnaround.zip.ZipUtil;
 import static name.azzurite.mcserver.util.LambdaExceptionUtil.*;
 import static name.azzurite.mcserver.util.StreamUtil.*;
 
-public class FTPServerSynchronizer implements ServerSynchronizer {
+public class ServerSynchronizer {
 
-	private static final Logger LOGGER = LoggerFactory.getLogger(FTPServerSynchronizer.class);
+	private static final Logger LOGGER = LoggerFactory.getLogger(ServerSynchronizer.class);
 	private static final String SERVER_IP_FILE = "runningServer";
 	private static final Map<String, List<String>> ZIP_FILES = new HashMap<>();
-    private static final String SAVE_IN_PROGRESS_FILE_NAME = "uploadInProgress";
+	private static final String SAVE_IN_PROGRESS_FILE_NAME = "uploadInProgress";
 	private static final long SECONDS_10 = 10000L;
 
 	static {
@@ -52,11 +56,18 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 	}
 
 	private final AppConfig appConfig;
-	private final AutoFTPClient ftpClient;
+	private final SyncClient syncClient;
 
-	public FTPServerSynchronizer(AppConfig appConfig) {
+	public static void main(String[] args) throws IOException, ExecutionException {
+		AppConfig appConfig = AppConfig.readConfig();
+		FTPSyncClient ftpSyncClient = new FTPSyncClient(appConfig);
+		ServerSynchronizer sync = new ServerSynchronizer(appConfig, ftpSyncClient);
+		sync.retrieveFiles();
+	}
+
+	public ServerSynchronizer(AppConfig appConfig, SyncClient syncClient) {
 		this.appConfig = appConfig;
-		ftpClient = new AutoFTPClient(appConfig);
+		this.syncClient = syncClient;
 	}
 
 	private static List<Path> pathToFileList(Path path) throws IOException {
@@ -96,40 +107,37 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 		LOGGER.info("Extract finished");
 	}
 
-	@Override
-	public Optional<String> getServerIp() throws IOException {
-		String serverIp = ftpClient.retrieveFileContents(SERVER_IP_FILE);
+	public Optional<String> getServerIp() throws ExecutionException {
+		String serverIp = AsyncUtil.getResult(syncClient.retrieveFileContents(SERVER_IP_FILE));
 
 		return StringUtils.isEmpty(serverIp) ? Optional.empty() : Optional.of(serverIp);
 	}
 
-	@Override
 	public void setServerIp(String ip) throws IOException {
 		LOGGER.info("Publishing server IP {}", ip);
-		ftpClient.setFileContents(SERVER_IP_FILE, ip);
+		syncClient.setFileContents(SERVER_IP_FILE, ip);
 	}
 
-	@Override
 	public void deleteServerIp() throws IOException {
 		LOGGER.info("Depublishing server IP");
-		ftpClient.deleteFile(SERVER_IP_FILE);
+		syncClient.deleteFile(SERVER_IP_FILE);
 	}
 
-	@Override
-	public void retrieveFiles() throws IOException {
+	public void retrieveFiles() throws ExecutionException, IOException {
 		while (isUploadInProgress()) {
 			LOGGER.info("Someone is still uploading the server files. Waiting for completion...");
-			try {
-				//noinspection BusyWait
-				Thread.sleep(SECONDS_10);
-			} catch (InterruptedException ignored) {
-			}
-
+			AsyncUtil.threadSleep(SECONDS_10);
 		}
 
 
+		Predicate<String> doesFileExist = rethrow((String file) -> {
+			Future<Boolean> futureResult = syncClient.doesFileExist(file);
+			Boolean result = AsyncUtil.getResult(futureResult);
+			return (result != null) && result;
+		});
+
 		Set<String> existingZipFiles = ZIP_FILES.keySet().stream()
-				.filter(ftpClient::doesFileExist)
+				.filter(doesFileExist)
 				.collect(Collectors.toSet());
 		LOGGER.info("Backing up previous data");
 		backupCurrentFiles(existingZipFiles);
@@ -142,9 +150,9 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 		LOGGER.info("Deleted previous data");
 		LOGGER.info("Downloading new server files");
 		existingZipFiles.stream()
-				.filter(ftpClient::doesFileExist)
-				.map(this::downloadFile)
-				.forEach(this::extractFile);
+				.filter(doesFileExist)
+				.map(rethrow(this::downloadFile))
+				.forEach(rethrow(this::extractFile));
 		LOGGER.info("Downloaded new server files");
 	}
 
@@ -184,23 +192,25 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 		zipFiles(zipFileMap);
 	}
 
-	private boolean isUploadInProgress() {
-		return Boolean.parseBoolean(ftpClient.retrieveFileContents(SAVE_IN_PROGRESS_FILE_NAME));
+	private boolean isUploadInProgress() throws ExecutionException {
+		Future<String> content = syncClient.retrieveFileContents(SAVE_IN_PROGRESS_FILE_NAME);
+		return Boolean.parseBoolean(AsyncUtil.getResult(content));
 	}
 
-	private Path downloadFile(String fileName) {
+	private Path downloadFile(String fileName) throws ExecutionException {
 		LOGGER.info("Downloading file '{}'...", fileName);
-		Path downloadedFile = ftpClient.downloadFile(fileName);
+		SyncActionFuture<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+		new ProgressLogger(downloadedFileResult).logProgress();
+		Path downloadedFile = AsyncUtil.getResult(downloadedFileResult);
 		LOGGER.info("Download finished");
 		return downloadedFile;
 	}
 
-	@Override
 	public void saveFiles() throws IOException {
-		ftpClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true));
+		syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true));
 		List<Path> paths = zipFiles(ZIP_FILES);
 		uploadFiles(paths);
-		ftpClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false));
+		syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false));
 		LOGGER.info("All server files synchronized!");
 	}
 
@@ -215,7 +225,7 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 
 		ZipEntrySource[] filesToZip = zipFileDescriptor.getValue().stream()
 				.map(appConfig.getBaseServerPath()::resolve)
-				.map(rethrow(FTPServerSynchronizer::pathToFileList))
+				.map(rethrow(ServerSynchronizer::pathToFileList))
 				.flatMap(List::stream)
 				.map(path -> {
 					Path relativePath = appConfig.getBaseServerPath().relativize(path);
@@ -235,7 +245,8 @@ public class FTPServerSynchronizer implements ServerSynchronizer {
 		paths.forEach((path) -> {
 			LOGGER.info("Uploading file '{}' to server", path);
 			LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
-			ftpClient.uploadFile(path);
+			SyncActionFuture<Void> future = syncClient.uploadFile(path);
+			new ProgressLogger(future).logProgress();
 			LOGGER.info("Upload finished");
 		});
 	}
