@@ -19,10 +19,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -95,8 +99,8 @@ public class ServerSynchronizer {
 		LOGGER.info("Extract finished");
 	}
 
-	public Optional<String> getServerIp() throws IOException {
-		String serverIp = syncClient.retrieveFileContents(SERVER_IP_FILE);
+	public Optional<String> getServerIp() throws ExecutionException {
+		String serverIp = AsyncUtil.getResult(syncClient.retrieveFileContents(SERVER_IP_FILE));
 
 		return StringUtils.isEmpty(serverIp) ? Optional.empty() : Optional.of(serverIp);
 	}
@@ -111,20 +115,21 @@ public class ServerSynchronizer {
 		syncClient.deleteFile(SERVER_IP_FILE);
 	}
 
-	public void retrieveFiles() throws IOException {
+	public void retrieveFiles() throws ExecutionException, IOException {
 		while (isUploadInProgress()) {
 			LOGGER.info("Someone is still uploading the server files. Waiting for completion...");
-			try {
-				//noinspection BusyWait
-				Thread.sleep(SECONDS_10);
-			} catch (InterruptedException ignored) {
-			}
-
+			AsyncUtil.threadSleep(SECONDS_10);
 		}
 
 
+		Predicate<String> doesFileExist = rethrow((String file) -> {
+			Future<Boolean> futureResult = syncClient.doesFileExist(file);
+			Boolean result = AsyncUtil.getResult(futureResult);
+			return (result != null) && result;
+		});
+
 		Set<String> existingZipFiles = ZIP_FILES.keySet().stream()
-				.filter(syncClient::doesFileExist)
+				.filter(doesFileExist)
 				.collect(Collectors.toSet());
 		LOGGER.info("Backing up previous data");
 		backupCurrentFiles(existingZipFiles);
@@ -137,9 +142,9 @@ public class ServerSynchronizer {
 		LOGGER.info("Deleted previous data");
 		LOGGER.info("Downloading new server files");
 		existingZipFiles.stream()
-				.filter(syncClient::doesFileExist)
-				.map(this::downloadFile)
-				.forEach(this::extractFile);
+				.filter(doesFileExist)
+				.map(rethrow(this::downloadFile))
+				.forEach(rethrow(this::extractFile));
 		LOGGER.info("Downloaded new server files");
 	}
 
@@ -179,13 +184,15 @@ public class ServerSynchronizer {
 		zipFiles(zipFileMap);
 	}
 
-	private boolean isUploadInProgress() {
-		return Boolean.parseBoolean(syncClient.retrieveFileContents(SAVE_IN_PROGRESS_FILE_NAME));
+	private boolean isUploadInProgress() throws ExecutionException {
+		Future<String> content = syncClient.retrieveFileContents(SAVE_IN_PROGRESS_FILE_NAME);
+		return Boolean.parseBoolean(AsyncUtil.getResult(content));
 	}
 
-	private Path downloadFile(String fileName) {
+	private Path downloadFile(String fileName) throws ExecutionException {
 		LOGGER.info("Downloading file '{}'...", fileName);
-		Path downloadedFile = syncClient.downloadFile(fileName);
+		Future<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+		Path downloadedFile = AsyncUtil.getResult(downloadedFileResult);
 		LOGGER.info("Download finished");
 		return downloadedFile;
 	}

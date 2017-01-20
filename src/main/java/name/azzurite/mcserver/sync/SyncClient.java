@@ -1,18 +1,19 @@
 package name.azzurite.mcserver.sync;
 
 import java.nio.file.Path;
+import java.util.concurrent.Future;
 
 public interface SyncClient {
 
-	String retrieveFileContents(String file);
+	Future<String> retrieveFileContents(String file);
 
-	void setFileContents(String file, String contents);
+	Future<Void> setFileContents(String file, String contents);
 
-	void deleteFile(String file);
+	Future<Void> deleteFile(String file);
 
-	void uploadFile(Path path);
+	Future<Void> uploadFile(Path path);
 
-	boolean doesFileExist(String file);
+	Future<Boolean> doesFileExist(String file);
 
-	Path downloadFile(String fileName);
+	Future<Path> downloadFile(String fileName);
 }

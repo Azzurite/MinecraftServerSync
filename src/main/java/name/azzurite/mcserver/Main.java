@@ -15,6 +15,7 @@ import name.azzurite.mcserver.minecraft.ServerList;
 import name.azzurite.mcserver.sync.ServerSynchronizer;
 import name.azzurite.mcserver.sync.SyncClient;
 import name.azzurite.mcserver.updates.UpdateChecker;
+import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +54,7 @@ public class Main {
 	private static void updateApplication(AppConfig appConfig) throws URISyntaxException {
 		try {
 			UpdateChecker updateChecker = new UpdateChecker(appConfig);
-				LOGGER.info("Checking for updates.");
+			LOGGER.info("Checking for updates.");
 			if (updateChecker.isNewerVersionAvailable()) {
 				LOGGER.info("Update available!");
 				if (updateChecker.shouldUpdate()) {
@@ -78,24 +79,18 @@ public class Main {
 			Desktop.getDesktop().browse(new URI(UpdateChecker.RELEASES_PAGE));
 		} else {
 			LOGGER.warn("Could not open browser automatically. Please navigate to the page {} manually.", UpdateChecker.RELEASES_PAGE);
-			try {
-				Thread.sleep(5000);
-			} catch (InterruptedException ignored) {
-			}
+			AsyncUtil.threadSleep(5000);
 		}
 	}
 
 
 	private static void waitAndExit(int status) {
-		try {
-			System.out.print("Shutting down in 3... ");
-			Thread.sleep(1000);
-			System.out.print("2... ");
-			Thread.sleep(1000);
-			System.out.print("1... ");
-			Thread.sleep(1000);
-		} catch (InterruptedException ignored) {
-		}
+		System.out.print("Shutting down in 3... ");
+		AsyncUtil.threadSleep(1000);
+		System.out.print("2... ");
+		AsyncUtil.threadSleep(1000);
+		System.out.print("1... ");
+		AsyncUtil.threadSleep(1000);
 		System.exit(status);
 	}
 
