@@ -4,7 +4,7 @@
 
 	<groupId>azzurite</groupId>
 	<artifactId>minecraft-server-sync</artifactId>
-	<version>1.3-SNAPSHOT</version>
+	<version>1.3.1</version>
 	<packaging>jar</packaging>
 
 	<properties>
@@ -75,6 +75,12 @@
 				<filtering>true</filtering>
 				<includes>
 					<include>version.txt</include>
+				</includes>
+			</resource>
+			<resource>
+				<directory>src/main/resources</directory>
+				<includes>
+					<include>**/*</include>
 				</includes>
 			</resource>
 		</resources>
