@@ -7,8 +7,11 @@ import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.sync.ServerSynchronizer;
+import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +31,7 @@ public class Server implements Closeable {
 
 	private Process serverProcess;
 
-	Server(AppConfig appConfig, ServerSynchronizer sync) throws IOException {
+	Server(AppConfig appConfig, ServerSynchronizer sync) throws IOException, ExecutionException {
 		this.appConfig = appConfig;
 		this.sync = sync;
 
@@ -60,7 +63,7 @@ public class Server implements Closeable {
 	}
 
 	@SuppressWarnings({"OverlyBroadThrowsClause", "UseOfSystemOutOrSystemErr"})
-	private void startLocal() throws IOException {
+	private void startLocal() throws IOException, ExecutionException {
 		System.out.println('\n' +
 				"###############################################\n" +
 				"##                                           ##\n" +
@@ -87,10 +90,7 @@ public class Server implements Closeable {
 	@SuppressWarnings("UseOfSystemOutOrSystemErr")
 	private void waitUntilServerTerminated() {
 		Thread thread = new Thread(() -> {
-			try {
-				Thread.sleep(10000);
-			} catch (InterruptedException ignored) {
-			}
+			AsyncUtil.threadSleep(10000);
 			System.out.println();
 			LOGGER.info("Enter 'stop' to exit the server and start syncing files");
 			System.out.print(">");

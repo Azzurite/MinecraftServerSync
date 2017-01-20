@@ -9,8 +9,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.sync.NoProgressSyncActionFuture;
+import name.azzurite.mcserver.sync.SyncActionFuture;
+import name.azzurite.mcserver.sync.SyncClient;
+import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
@@ -21,21 +29,27 @@ import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class AutoFTPClient {
+public class FTPSyncClient implements SyncClient {
 
 	private static final int MAX_RETRIES = 3;
 
 	private static final int BUF_SIZE = 1048576;
 
-	private static final Logger LOGGER = LoggerFactory.getLogger(AutoFTPClient.class);
+	private static final Logger LOGGER = LoggerFactory.getLogger(FTPSyncClient.class);
 
 	private final FTPClient ftpClient = new FTPClient();
 
 	private final AppConfig appConfig;
 
-	AutoFTPClient(AppConfig appConfig) {
+	private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+	private final FTPTransferProgressListener progressListener;
+
+	public FTPSyncClient(AppConfig appConfig) {
 		ftpClient.setBufferSize(BUF_SIZE);
 		this.appConfig = appConfig;
+		progressListener = new FTPTransferProgressListener();
+		ftpClient.setCopyStreamListener(progressListener);
 	}
 
 	private static void logFtpCommand(FTPClient ftp, String commandName, Object... arguments) {
@@ -122,13 +136,16 @@ class AutoFTPClient {
 					appConfig.getFtpBaseDirectory().orElseThrow(() -> createMissingConfigEx("ftp base directory"));
 			ftpClient.changeWorkingDirectory(baseDirectory);
 			logFtpCommand(ftpClient, "changeWorkingDirectory", baseDirectory);
-		}, ftpClient::disconnect);
+		}, () -> {
+			ftpClient.disconnect();
+		});
 	}
 
-	public String retrieveFileContents(String file) {
+	@Override
+	public SyncActionFuture<String> retrieveFileContents(String file) {
 		LOGGER.debug("Retrieving file contents for file '{}'", file);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " content retrieval", perform(() -> {
 			try (ByteArrayOutputStream temp = new ByteArrayOutputStream()) {
 				ftpClient.retrieveFile(file, temp);
 				logFtpCommand(ftpClient, "downloadFile", file);
@@ -139,10 +156,10 @@ class AutoFTPClient {
 
 				return fileContents;
 			}
-		});
+		}));
 	}
 
-	private byte[] retrieveByteFileContents(String file) {
+	private Future<byte[]> retrieveByteFileContents(String file) {
 		LOGGER.debug("Retrieving byte file contents for file '{}'", file);
 
 		return perform(() -> {
@@ -158,66 +175,80 @@ class AutoFTPClient {
 		});
 	}
 
-	public void setFileContents(String file, String contents) {
+	@Override
+	public SyncActionFuture<Void> setFileContents(String file, String contents) {
 		LOGGER.debug("Setting file({}) contents: {}", file, contents);
 
-		perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " set content", perform(() -> {
 			ftpClient.storeFile(file, IOUtils.toInputStream(contents, "UTF-8"));
 			logFtpCommand(ftpClient, "storeFile", file, contents);
-		});
+		}));
 	}
 
-	public void deleteFile(String file) {
+	@Override
+	public SyncActionFuture<Void> deleteFile(String file) {
 		LOGGER.debug("Deleting file: {}", file);
 
-		perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " deletion", perform(() -> {
 			ftpClient.deleteFile(file);
 			logFtpCommand(ftpClient, "deleteFile", file);
-		});
+		}));
 	}
 
-	public void uploadFile(Path path) {
+	@Override
+	public SyncActionFuture<Void> uploadFile(Path path) {
 		LOGGER.debug("Uploading file: {}", path);
 
 		String fileName = path.getFileName().toString();
 		String md5FileName = generateMd5FileName(fileName);
 
-		perform(() -> {
+		long fileSize = getFileSize(fileName);
 
-			byte[] remoteMd5 = retrieveByteFileContents(md5FileName);
-			byte[] localMd5 = computeMd5(path);
-			if (Arrays.equals(localMd5, remoteMd5)) {
-				LOGGER.debug("Equal MD5, skipping upload.");
-				return;
-			}
+		Future<Void> uploadResult = perform(() -> {
+			try {
+				byte[] remoteMd5 = new byte[0];
+				remoteMd5 = AsyncUtil.getResult(retrieveByteFileContents(md5FileName));
+				byte[] localMd5 = computeMd5(path);
+				if (Arrays.equals(localMd5, remoteMd5)) {
+					LOGGER.debug("Equal MD5, skipping upload.");
+				}
 
-			try (InputStream zipFile = Files.newInputStream(path);
-				 InputStream md5File = new ByteArrayInputStream(localMd5)) {
-				ftpClient.storeFile(fileName, zipFile);
-				logFtpCommand(ftpClient, "storeFile", fileName);
-				ftpClient.storeFile(md5FileName, md5File);
-				logFtpCommand(ftpClient, "storeFile", md5FileName);
+				try (InputStream zipFile = Files.newInputStream(path);
+					 InputStream md5File = new ByteArrayInputStream(localMd5)) {
+					ftpClient.storeFile(fileName, zipFile);
+					logFtpCommand(ftpClient, "storeFile", fileName);
+					ftpClient.storeFile(md5FileName, md5File);
+					logFtpCommand(ftpClient, "storeFile", md5FileName);
 
-				LOGGER.debug("Uploaded file: {}", path);
+					LOGGER.debug("Uploaded file: {}", path);
+				}
+			} catch (ExecutionException e) {
+				throw new FTPException(e);
 			}
 		});
+		
+		return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, fileName + " upload", fileSize);
 	}
 
-	public boolean doesFileExist(String file) {
+	@Override
+	public SyncActionFuture<Boolean> doesFileExist(String file) {
 		LOGGER.debug("Checking file existence: {}", file);
 
-		return perform(() -> {
+		return new NoProgressSyncActionFuture<>(file + " existance check", perform(() -> {
 			FTPFile[] ftpFiles = ftpClient.listFiles(file);
 			logFtpCommand(ftpClient, "listFiles", file);
 
 			return ftpFiles.length > 0;
-		});
+		}));
 	}
 
-	public Path downloadFile(String fileName) {
+	@Override
+	public SyncActionFuture<Path> downloadFile(String fileName) {
 		LOGGER.debug("Downloading file {}", fileName);
 
-		return perform(() -> {
+		long fileSize = getFileSize(fileName);
+
+		Future<Path> downloadResult = perform(() -> {
 			Path localPath = appConfig.getSyncPath().resolve(fileName);
 
 			try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream()) {
@@ -240,70 +271,94 @@ class AutoFTPClient {
 
 			return localPath;
 		});
+
+		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, fileName + " download", fileSize);
 	}
 
-	private <R> R retry(FTPAction<R> action, FTPVoidAction onFail) {
-		for (int i = 1; i <= MAX_RETRIES; ++i) {
-			try {
-				if (i > 1) {
-					LOGGER.debug("Trying action again after failure...");
-				}
-				return action.perform();
-			} catch (FTPConnectionClosedException e) {
-				LOGGER.debug("Connection lost, reconnecting...");
-				LogUtil.stacktrace(LOGGER, e);
+	private <R> Future<R> retry(FTPAction<R> action, FTPVoidAction onFail) {
+		return executor.submit(() -> {
+			for (int i = 1; i <= MAX_RETRIES; ++i) {
 				try {
-					ftpClient.disconnect();
-				} catch (IOException ignore) {
-				}
-
-				tryConnect();
-			} catch (IOException e) {
-				LOGGER.warn("Error during FTP action");
-				LogUtil.stacktrace(LOGGER, e);
-
-				if (onFail != null) {
+					if (i > 1) {
+						LOGGER.debug("Trying action again after failure...");
+					}
+					return action.perform();
+				} catch (FTPConnectionClosedException e) {
+					LOGGER.debug("Connection lost, reconnecting...");
+					LogUtil.stacktrace(LOGGER, e);
 					try {
-						onFail.perform();
-					} catch (IOException e1) {
-						LOGGER.warn("Error while performing onFail action");
-						LogUtil.stacktrace(LOGGER, e1);
+						ftpClient.disconnect();
+					} catch (IOException ignore) {
+					}
+
+					tryConnect();
+				} catch (IOException e) {
+					LOGGER.warn("Error during FTP action");
+					LogUtil.stacktrace(LOGGER, e);
+
+					if (onFail != null) {
+						try {
+							onFail.perform();
+						} catch (IOException e1) {
+							LOGGER.warn("Error while performing onFail action");
+							LogUtil.stacktrace(LOGGER, e1);
+						}
 					}
 				}
 			}
-		}
-
-		throw new FTPException("Could not perform FTP action.");
+			throw new FTPException("Could not perform FTP action.");
+		});
 	}
 
-	@SuppressWarnings("ReturnOfNull")
-	private void retry(FTPVoidAction action, FTPVoidAction onFail) {
-		retry(() -> {
+	private Future<Void> retry(FTPVoidAction action, FTPVoidAction onFail) {
+		return retry(() -> {
 			action.perform();
-			return null;
+			return (Void) null;
 		}, onFail);
 	}
 
-	private <R> R perform(FTPAction<R> action, FTPVoidAction onFail) {
+	private <R> Future<R> perform(FTPAction<R> action, FTPVoidAction onFail) {
 		tryConnect();
 
 		return retry(action, onFail);
 	}
 
-	private <R> R perform(FTPAction<R> action) {
-		return perform(action, null);
-	}
+	private Future<Void> perform(FTPVoidAction action, FTPVoidAction onFail) {
+		tryConnect();
 
-	@SuppressWarnings("ReturnOfNull")
-	private void perform(FTPVoidAction action, FTPVoidAction onFail) {
-		perform(() -> {
+		return retry(() -> {
 			action.perform();
-			return null;
+			return (Void) null;
 		}, onFail);
 	}
 
-
-	private void perform(FTPVoidAction action) {
-		perform(action, null);
+	private <R> Future<R> perform(FTPAction<R> action) {
+		return perform(action, null);
 	}
+
+	private <R> Future<Void> perform(FTPVoidAction action) {
+		return perform(() -> {
+			action.perform();
+			return (Void) null;
+		});
+	}
+
+	private long getFileSize(String fileName) {
+		Future<Long> fileSizeResult = perform(() -> {
+			long fileSize = 0;
+			FTPFile[] files = ftpClient.listFiles(fileName);
+			if (files.length != 1 || !files[0].isFile()) {
+				throw new FTPException("Could not get size of file " + fileName);
+			}
+			return files[0].getSize();
+		});
+
+		try {
+			return AsyncUtil.getResult(fileSizeResult);
+		} catch (ExecutionException e) {
+			throw new FTPException(e);
+		}
+
+	}
+
 }
