@@ -23,7 +23,7 @@ public class NoProgressSyncActionFuture<R> extends SyncActionFuture<R> {
 		}
 
 		@Override
-		public String toHumanReadableString() {
+		public String getStats() {
 			return "";
 		}
 	}

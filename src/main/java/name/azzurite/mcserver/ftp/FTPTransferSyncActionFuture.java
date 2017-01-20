@@ -13,6 +13,8 @@ public class FTPTransferSyncActionFuture<R> extends SyncActionFuture<R> {
 
 	private final FTPTransferProgressListener progressListener;
 
+	private FTPTransferProgress lastProgress;
+
 	public FTPTransferSyncActionFuture(Future<R> future, FTPTransferProgressListener progressListener, String actionName, long fileSize) {
 		super(future);
 		this.progressListener = progressListener;
@@ -22,7 +24,10 @@ public class FTPTransferSyncActionFuture<R> extends SyncActionFuture<R> {
 
 	@Override
 	public SyncActionProgress getProgress() {
-		return new FTPTransferProgress(actionName, fileSize, progressListener);
+		FTPTransferProgress ftpTransferProgress =
+				new FTPTransferProgress(actionName, fileSize, progressListener.getCurrentTransferTotalBytes(), lastProgress);
+		lastProgress = ftpTransferProgress;
+		return ftpTransferProgress;
 	}
 
 }

@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 
 import name.azzurite.mcserver.config.AppConfig;
+import name.azzurite.mcserver.ftp.FTPSyncClient;
 import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
 import org.apache.commons.lang3.StringUtils;
@@ -56,6 +57,13 @@ public class ServerSynchronizer {
 
 	private final AppConfig appConfig;
 	private final SyncClient syncClient;
+
+	public static void main(String[] args) throws IOException, ExecutionException {
+		AppConfig appConfig = AppConfig.readConfig();
+		FTPSyncClient ftpSyncClient = new FTPSyncClient(appConfig);
+		ServerSynchronizer sync = new ServerSynchronizer(appConfig, ftpSyncClient);
+		sync.retrieveFiles();
+	}
 
 	public ServerSynchronizer(AppConfig appConfig, SyncClient syncClient) {
 		this.appConfig = appConfig;

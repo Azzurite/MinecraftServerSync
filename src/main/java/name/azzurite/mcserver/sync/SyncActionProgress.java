@@ -5,6 +5,9 @@ import java.util.Map;
 public abstract class SyncActionProgress {
 
 	private final String  actionName;
+
+	private final long nanos = System.nanoTime();
+
 	protected SyncActionProgress(String actionName) {
 		this.actionName = actionName;
 	}
@@ -17,5 +20,9 @@ public abstract class SyncActionProgress {
 		return actionName;
 	}
 
-	public abstract String toHumanReadableString();
+	public long getNanoTime() {
+		return nanos;
+	}
+
+	public abstract String getStats();
 }

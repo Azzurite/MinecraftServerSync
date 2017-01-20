@@ -67,6 +67,12 @@
 			<artifactId>json</artifactId>
 			<version>20160810</version>
 		</dependency>
+
+		<dependency>
+			<groupId>com.jakewharton.byteunits</groupId>
+			<artifactId>byteunits</artifactId>
+			<version>0.9.1</version>
+		</dependency>
 	</dependencies>
 	<build>
 		<resources>

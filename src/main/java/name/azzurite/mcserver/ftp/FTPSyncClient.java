@@ -52,12 +52,6 @@ public class FTPSyncClient implements SyncClient {
 		ftpClient.setCopyStreamListener(progressListener);
 	}
 
-	public static void main(String[] args) {
-		AppConfig appConfig = AppConfig.readConfig();
-		SyncClient ftpClient = new FTPSyncClient(appConfig);
-		ftpClient.downloadFile("map.zip");
-	}
-
 	private static void logFtpCommand(FTPClient ftp, String commandName, Object... arguments) {
 		logCommand(commandName, arguments);
 		logResult(ftp);
@@ -208,6 +202,8 @@ public class FTPSyncClient implements SyncClient {
 		String fileName = path.getFileName().toString();
 		String md5FileName = generateMd5FileName(fileName);
 
+		long fileSize = getFileSize(fileName);
+
 		Future<Void> uploadResult = perform(() -> {
 			try {
 				byte[] remoteMd5 = new byte[0];
@@ -230,7 +226,7 @@ public class FTPSyncClient implements SyncClient {
 				throw new FTPException(e);
 			}
 		});
-		long fileSize = getFileSize(fileName);
+		
 		return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, fileName + " upload", fileSize);
 	}
 
@@ -249,6 +245,8 @@ public class FTPSyncClient implements SyncClient {
 	@Override
 	public SyncActionFuture<Path> downloadFile(String fileName) {
 		LOGGER.debug("Downloading file {}", fileName);
+
+		long fileSize = getFileSize(fileName);
 
 		Future<Path> downloadResult = perform(() -> {
 			Path localPath = appConfig.getSyncPath().resolve(fileName);
@@ -273,7 +271,7 @@ public class FTPSyncClient implements SyncClient {
 
 			return localPath;
 		});
-		long fileSize = getFileSize(fileName);
+
 		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, fileName + " download", fileSize);
 	}
 
