@@ -90,7 +90,10 @@ public final class AppConfig {
 	}
 
 	public Path getSyncPath() {
-		return getBaseServerPath().resolve("sync");
+		return getBaseServerPath().resolve("MinecraftServerSync/sync");
+	}
+	public Path getBackupPath() {
+		return getBaseServerPath().resolve("MinecraftServerSync/backup");
 	}
 
 	public Optional<String> getMinecraftLauncherPath() {

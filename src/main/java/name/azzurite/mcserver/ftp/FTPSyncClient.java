@@ -7,12 +7,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import name.azzurite.mcserver.config.AppConfig;
 import name.azzurite.mcserver.sync.NoProgressSyncActionFuture;
@@ -29,6 +32,8 @@ import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static name.azzurite.mcserver.util.LambdaExceptionUtil.*;
+
 public class FTPSyncClient implements SyncClient {
 
 	private static final int MAX_RETRIES = 3;
@@ -41,7 +46,7 @@ public class FTPSyncClient implements SyncClient {
 
 	private final AppConfig appConfig;
 
-	private final ExecutorService executor = Executors.newSingleThreadExecutor();
+	private final ExecutorService executor = Executors.newFixedThreadPool(10);
 
 	private final FTPTransferProgressListener progressListener;
 
@@ -92,8 +97,14 @@ public class FTPSyncClient implements SyncClient {
 		return new FTPException("The required property " + property + " could not be found.");
 	}
 
-	private static String generateMd5FileName(String fileName) {
-		return fileName + ".md5";
+	private static String generateMd5FileName(Path file) {
+		String md5FileName = file.getFileName() + ".md5";
+		Path parent = file.getParent();
+		if (parent != null) {
+			return toFtpPath(file.getParent().resolve(md5FileName));
+		} else {
+			return md5FileName;
+		}
 	}
 
 	private static byte[] computeMd5(Path localPath) throws IOException {
@@ -105,40 +116,48 @@ public class FTPSyncClient implements SyncClient {
 		}
 	}
 
+	private static String toFtpPath(Path path) {
+		return path.toString().replaceAll("\\\\", "/");
+	}
+
 	private void tryConnect() {
 		if (ftpClient.isConnected()) {
 			return;
 		}
 		LOGGER.debug("Connecting...");
 
-		retry(() -> {
-			String hostName = appConfig.getFtpHostName().orElseThrow(() -> createMissingConfigEx("ftp host name"));
-			String port = appConfig.getFtpPort().orElseThrow(() -> createMissingConfigEx("ftp port"));
-			ftpClient.connect(hostName, Integer.valueOf(port));
-			logFtpCommand(ftpClient, "tryConnect", hostName, port);
+		try {
+			AsyncUtil.getResult(retry(() -> {
+				String hostName = appConfig.getFtpHostName().orElseThrow(() -> createMissingConfigEx("ftp host name"));
+				String port = appConfig.getFtpPort().orElseThrow(() -> createMissingConfigEx("ftp port"));
+				ftpClient.connect(hostName, Integer.valueOf(port));
+				logFtpCommand(ftpClient, "tryConnect", hostName, port);
 
-			ftpClient.enterLocalPassiveMode();
-			logFtpCommand(ftpClient, "enterLocalPassiveMode");
+				ftpClient.enterLocalPassiveMode();
+				logFtpCommand(ftpClient, "enterLocalPassiveMode");
 
-			Optional<String> userName = appConfig.getFtpUserName();
-			Optional<String> password = appConfig.getFtpPassword();
-			if (userName.isPresent() && password.isPresent()) {
-				ftpClient.login(userName.get(), password.get());
-				logFtpCommand(ftpClient, "login", userName.get(), password.get());
-			} else {
-				LOGGER.warn("No authentication for ftp set!");
-			}
+				Optional<String> userName = appConfig.getFtpUserName();
+				Optional<String> password = appConfig.getFtpPassword();
+				if (userName.isPresent() && password.isPresent()) {
+					ftpClient.login(userName.get(), password.get());
+					logFtpCommand(ftpClient, "login", userName.get(), password.get());
+				} else {
+					LOGGER.warn("No authentication for ftp set!");
+				}
 
-			ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
-			logFtpCommand(ftpClient, "setFileType");
+				ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+				logFtpCommand(ftpClient, "setFileType");
 
-			String baseDirectory =
-					appConfig.getFtpBaseDirectory().orElseThrow(() -> createMissingConfigEx("ftp base directory"));
-			ftpClient.changeWorkingDirectory(baseDirectory);
-			logFtpCommand(ftpClient, "changeWorkingDirectory", baseDirectory);
-		}, () -> {
-			ftpClient.disconnect();
-		});
+				String baseDirectory =
+						appConfig.getFtpBaseDirectory().orElseThrow(() -> createMissingConfigEx("ftp base directory"));
+				ftpClient.changeWorkingDirectory(baseDirectory);
+				logFtpCommand(ftpClient, "changeWorkingDirectory", baseDirectory);
+			}, () -> {
+				ftpClient.disconnect();
+			}));
+		} catch (ExecutionException e) {
+			new FTPException(e);
+		}
 	}
 
 	@Override
@@ -159,20 +178,18 @@ public class FTPSyncClient implements SyncClient {
 		}));
 	}
 
-	private Future<byte[]> retrieveByteFileContents(String file) {
+	private byte[] retrieveByteFileContents(String file) throws IOException {
 		LOGGER.debug("Retrieving byte file contents for file '{}'", file);
 
-		return perform(() -> {
-			try (ByteArrayOutputStream temp = new ByteArrayOutputStream()) {
-				ftpClient.retrieveFile(file, temp);
-				logFtpCommand(ftpClient, "downloadFile", file);
+		try (ByteArrayOutputStream temp = new ByteArrayOutputStream()) {
+			ftpClient.retrieveFile(file, temp);
+			logFtpCommand(ftpClient, "downloadFile", file);
 
-				byte[] bytes = temp.toByteArray();
-				LOGGER.debug("File contents retrieved: {}", bytes);
+			byte[] bytes = temp.toByteArray();
+			LOGGER.debug("File contents retrieved: {}", bytes);
 
-				return bytes;
-			}
-		});
+			return bytes;
+		}
 	}
 
 	@Override
@@ -180,8 +197,7 @@ public class FTPSyncClient implements SyncClient {
 		LOGGER.debug("Setting file({}) contents: {}", file, contents);
 
 		return new NoProgressSyncActionFuture<>(file + " set content", perform(() -> {
-			ftpClient.storeFile(file, IOUtils.toInputStream(contents, "UTF-8"));
-			logFtpCommand(ftpClient, "storeFile", file, contents);
+			ftpStoreFile(file, IOUtils.toInputStream(contents, "UTF-8"));
 		}));
 	}
 
@@ -199,47 +215,49 @@ public class FTPSyncClient implements SyncClient {
 	public SyncActionFuture<Void> uploadFile(Path path) {
 		LOGGER.debug("Uploading file: {}", path);
 
-		String fileName = path.getFileName().toString();
-		String md5FileName = generateMd5FileName(fileName);
+		try {
+			Path relativeToBase = appConfig.getBaseServerPath().relativize(path);
+			String ftpFileName = toFtpPath(relativeToBase);
+			String ftpMd5FileName = generateMd5FileName(relativeToBase).replaceAll("\\\\", "/");
 
-		long fileSize = getFileSize(fileName);
+			long fileSize = Files.size(path);
 
-		Future<Void> uploadResult = perform(() -> {
-			try {
+			Future<Void> uploadResult = perform(() -> {
 				byte[] remoteMd5 = new byte[0];
-				remoteMd5 = AsyncUtil.getResult(retrieveByteFileContents(md5FileName));
+				remoteMd5 = retrieveByteFileContents(ftpMd5FileName);
 				byte[] localMd5 = computeMd5(path);
 				if (Arrays.equals(localMd5, remoteMd5)) {
 					LOGGER.debug("Equal MD5, skipping upload.");
+					return;
 				}
 
 				try (InputStream zipFile = Files.newInputStream(path);
 					 InputStream md5File = new ByteArrayInputStream(localMd5)) {
-					ftpClient.storeFile(fileName, zipFile);
-					logFtpCommand(ftpClient, "storeFile", fileName);
-					ftpClient.storeFile(md5FileName, md5File);
-					logFtpCommand(ftpClient, "storeFile", md5FileName);
+					ftpStoreFile(ftpFileName, zipFile);
+					ftpStoreFile(ftpMd5FileName, md5File);
 
 					LOGGER.debug("Uploaded file: {}", path);
 				}
-			} catch (ExecutionException e) {
-				throw new FTPException(e);
-			}
-		});
-		
-		return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, fileName + " upload", fileSize);
+			});
+
+			return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, ftpFileName + " upload", fileSize);
+		} catch (IOException e) {
+			throw new FTPException(e);
+		}
 	}
 
 	@Override
 	public SyncActionFuture<Boolean> doesFileExist(String file) {
 		LOGGER.debug("Checking file existence: {}", file);
 
-		return new NoProgressSyncActionFuture<>(file + " existance check", perform(() -> {
-			FTPFile[] ftpFiles = ftpClient.listFiles(file);
-			logFtpCommand(ftpClient, "listFiles", file);
+		return new NoProgressSyncActionFuture<>(file + " existance check", perform(() -> ftpFileExists(file)));
+	}
 
-			return ftpFiles.length > 0;
-		}));
+	private boolean ftpFileExists(String file) throws IOException {
+		FTPFile[] ftpFiles = ftpClient.listFiles(file);
+		logFtpCommand(ftpClient, "listFiles", file);
+
+		return ftpFiles.length > 0;
 	}
 
 	@Override
@@ -249,10 +267,10 @@ public class FTPSyncClient implements SyncClient {
 		long fileSize = getFileSize(fileName);
 
 		Future<Path> downloadResult = perform(() -> {
-			Path localPath = appConfig.getSyncPath().resolve(fileName);
+			Path localPath = appConfig.getBaseServerPath().resolve(fileName);
 
 			try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream()) {
-				String md5FileName = generateMd5FileName(fileName);
+				String md5FileName = generateMd5FileName(Paths.get(fileName));
 
 				ftpClient.retrieveFile(md5FileName, byteStream);
 				logFtpCommand(ftpClient, "retrieveFile", fileName);
@@ -273,6 +291,59 @@ public class FTPSyncClient implements SyncClient {
 		});
 
 		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, fileName + " download", fileSize);
+	}
+
+	@Override
+	public SyncActionFuture<List<String>> findServerFiles() {
+		Future<List<String>> findServerFilesResult = perform(() -> {
+			return listFilesRecursively(toFtpPath(appConfig.getBaseServerPath().relativize(appConfig.getSyncPath())));
+		});
+
+		return new NoProgressSyncActionFuture<>("list server files", findServerFilesResult);
+	}
+
+	private void ftpStoreFile(String file, InputStream is) throws IOException {
+		Path filePath = Paths.get(file);
+		ftpCreateParentDirs(filePath);
+
+		ftpClient.storeFile(file, is);
+		logFtpCommand(ftpClient, "ftpStoreFile", file);
+	}
+
+	private void ftpCreateParentDirs(Path filePath) throws IOException {
+		Path parent = filePath.getParent();
+		if (parent != null) {
+			if (!ftpFileExists(toFtpPath(parent))) {
+				ftpCreateParentDirs(parent);
+				ftpCreateDir(parent);
+			}
+		}
+	}
+
+	private void ftpCreateDir(Path dir) throws IOException {
+		ftpClient.makeDirectory(toFtpPath(dir));
+		logFtpCommand(ftpClient, "makeDirectory", dir);
+	}
+
+	private List<String> listFilesRecursively(String directory) throws IOException {
+		FTPFile[] listFiles = ftpClient.listFiles(directory);
+		List<FTPFile> ftpFiles = Arrays.asList(listFiles);
+
+		List<String> curFiles = ftpFiles.stream()
+				.filter(FTPFile::isFile)
+				.filter(file -> !file.getName().endsWith(".md5"))
+				.map(file -> directory + '/' + file.getName())
+				.collect(Collectors.toList());
+
+		List<String> subDirectoryFiles = ftpFiles.stream()
+				.filter(FTPFile::isDirectory)
+				.map(rethrow((FTPFile dir) -> listFilesRecursively(directory + '/' + dir.getName())))
+				.flatMap(List::stream)
+				.collect(Collectors.toList());
+
+		curFiles.addAll(subDirectoryFiles);
+
+		return curFiles;
 	}
 
 	private <R> Future<R> retry(FTPAction<R> action, FTPVoidAction onFail) {

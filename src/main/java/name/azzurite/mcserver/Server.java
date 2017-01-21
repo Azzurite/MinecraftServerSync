@@ -83,8 +83,12 @@ public class Server implements Closeable {
 		}
 
 		waitUntilServerTerminated();
-		sync.deleteServerIp();
-		sync.saveFiles();
+		try {
+			sync.deleteServerIp();
+			sync.saveFiles();
+		} catch (ExecutionException e) {
+			throw new IOException(e);
+		}
 	}
 
 	@SuppressWarnings("UseOfSystemOutOrSystemErr")

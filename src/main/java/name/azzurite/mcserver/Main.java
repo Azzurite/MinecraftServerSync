@@ -97,6 +97,7 @@ public class Main {
 	private static void createNecessaryDirectories(AppConfig appConfig) throws IOException {
 		Files.createDirectories(appConfig.getBaseServerPath());
 		Files.createDirectories(appConfig.getSyncPath());
+		Files.createDirectories(appConfig.getBackupPath());
 	}
 
 	private static void startMinecraft(AppConfig appConfig) throws IOException {

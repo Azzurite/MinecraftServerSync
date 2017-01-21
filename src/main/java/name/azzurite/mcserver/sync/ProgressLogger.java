@@ -12,8 +12,8 @@ public class ProgressLogger {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(ProgressLogger.class);
 
-	private static final Executor executor = Executors.newSingleThreadExecutor();
-	private static final int UPDATE_INTERVAL_MILLIS = 2000;
+	private static final Executor executor = Executors.newFixedThreadPool(10);
+	private static final int UPDATE_INTERVAL_MILLIS = 1000;
 	private static final double SECONDS_IN_MINUTE = 60.0;
 
 	private final SyncActionFuture<?> future;
@@ -26,7 +26,7 @@ public class ProgressLogger {
 
 	public void logProgress() {
 		executor.execute(() -> {
-			AsyncUtil.threadSleep(2000);
+			AsyncUtil.threadSleep(500);
 			while (!future.isDone()) {
 				SyncActionProgress progress = future.getProgress();
 				double percent = progress.getPercent();

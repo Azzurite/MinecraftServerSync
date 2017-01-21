@@ -1,6 +1,7 @@
 package name.azzurite.mcserver.sync;
 
 import java.nio.file.Path;
+import java.util.List;
 
 public interface SyncClient {
 
@@ -15,4 +16,6 @@ public interface SyncClient {
 	SyncActionFuture<Boolean> doesFileExist(String file);
 
 	SyncActionFuture<Path> downloadFile(String fileName);
+
+	SyncActionFuture<List<String>> findServerFiles();
 }
