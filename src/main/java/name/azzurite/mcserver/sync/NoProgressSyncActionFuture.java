@@ -9,7 +9,7 @@ public class NoProgressSyncActionFuture<R> extends SyncActionFuture<R> {
 	private static class NoSyncActionProgress extends SyncActionProgress {
 
 		NoSyncActionProgress(String actionName) {
-			super(actionName);
+			super(actionName, null);
 		}
 
 		@Override

@@ -304,7 +304,9 @@ public class FTPSyncClient implements SyncClient {
 				})
 				.collect(Collectors.toList());
 
+		LOGGER.debug("Retrieving total file size of remote files ");
 		long totalFileSize = getTotalRemoteFileSize(filesToDownload);
+		LOGGER.debug("Total file size of remote files: {}", totalFileSize);
 
 		Future<List<Path>> downloadResult = perform(() -> {
 			filesToDownload.stream()
@@ -431,12 +433,20 @@ public class FTPSyncClient implements SyncClient {
 	private Path downloadFile(String remoteFileName) throws IOException {
 		Path localPath = toLocalPath(remoteFileName);
 
-		try (FileOutputStream fileStream = new FileOutputStream(localPath.toFile())) {
+		ftpRetrieveFile(remoteFileName, localPath);
+
+		return localPath;
+	}
+
+	private void ftpRetrieveFile(String remoteFileName, Path path) throws IOException {
+		Path parent = path.getParent();
+		if (parent != null) {
+			Files.createDirectories(parent);
+		}
+		try (FileOutputStream fileStream = new FileOutputStream(path.toFile())) {
 			ftpClient.retrieveFile(remoteFileName, fileStream);
 			logFtpCommand(ftpClient, "retrieveFile", remoteFileName);
 		}
-
-		return localPath;
 	}
 
 	@Override

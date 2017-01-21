@@ -17,13 +17,10 @@ public class FTPTransferProgress extends SyncActionProgress {
 	private final long transferredBytes;
 	private final long totalBytes;
 
-	private FTPTransferProgress lastProgress;
-
 	FTPTransferProgress(String actionName, long totalBytes, long transferredBytes, FTPTransferProgress lastProgress) {
-		super(actionName);
+		super(actionName, lastProgress);
 		this.totalBytes = totalBytes;
 		this.transferredBytes = transferredBytes;
-		this.lastProgress = lastProgress;
 	}
 
 	@Override
@@ -41,14 +38,14 @@ public class FTPTransferProgress extends SyncActionProgress {
 
 	@Override
 	public String getStats() {
-		if (lastProgress == null) {
+		if (getLastProgress() == null) {
 			return "not available";
 		}
 
 
-		long nanosSinceLastProgress = getNanoTime() - lastProgress.getNanoTime();
+		long nanosSinceLastProgress = getNanoTime() - getLastProgress().getNanoTime();
 		double secondsSinceLastProgress = nanosSinceLastProgress / NANOS_IN_SECOND;
-		long bytesSinceLastProgress = transferredBytes - lastProgress.transferredBytes;
+		long bytesSinceLastProgress = transferredBytes - ((FTPTransferProgress) getLastProgress()).transferredBytes;
 
 		String perSec = byteToReadableString((long) (bytesSinceLastProgress / secondsSinceLastProgress));
 		String transferred = byteToReadableString(transferredBytes);
