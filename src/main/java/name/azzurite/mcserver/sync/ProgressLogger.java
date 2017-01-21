@@ -12,13 +12,12 @@ public class ProgressLogger {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(ProgressLogger.class);
 
-	private static final Executor executor = Executors.newSingleThreadExecutor();
-	private static final int UPDATE_INTERVAL_MILLIS = 2000;
+	private static final Executor executor = Executors.newFixedThreadPool(10);
+	private static final int UPDATE_INTERVAL_MILLIS = 1000;
 	private static final double SECONDS_IN_MINUTE = 60.0;
+	private static final double NANOS_IN_SECOND = 1_000_000_000;
 
 	private final SyncActionFuture<?> future;
-
-	private SyncActionProgress lastProgress;
 
 	public ProgressLogger(SyncActionFuture<?> future) {
 		this.future = future;
@@ -26,7 +25,7 @@ public class ProgressLogger {
 
 	public void logProgress() {
 		executor.execute(() -> {
-			AsyncUtil.threadSleep(2000);
+			AsyncUtil.threadSleep(500);
 			while (!future.isDone()) {
 				SyncActionProgress progress = future.getProgress();
 				double percent = progress.getPercent();
@@ -34,13 +33,14 @@ public class ProgressLogger {
 				LOGGER.info("{} progress: {}, ETA: {}, stats: {}", progress.getActionName(), Constants.PERCENT_FORMAT.format(percent),
 						getETA(progress),
 						progress.getStats());
-				lastProgress = progress;
+
 				AsyncUtil.threadSleep(UPDATE_INTERVAL_MILLIS);
 			}
 		});
 	}
 
 	private String getETA(SyncActionProgress currentProgress) {
+		SyncActionProgress lastProgress = currentProgress.getLastProgress();
 		if (lastProgress == null) {
 			return "not available";
 		}
@@ -49,13 +49,14 @@ public class ProgressLogger {
 		double currentPercent = currentProgress.getPercent();
 		double percentSinceLastProgress = currentPercent - lastPercent;
 		double percentRemaining = 1 - currentPercent;
-		double millisUntilDone = percentRemaining / percentSinceLastProgress * UPDATE_INTERVAL_MILLIS;
-		double seconds = millisUntilDone / 1000L;
+		double nanosSinceLastProgress = currentProgress.getNanoTime() - lastProgress.getNanoTime();
+		double secondsSinceLastProgress = nanosSinceLastProgress / NANOS_IN_SECOND;
+		double secondsUntilDone = percentRemaining / percentSinceLastProgress * secondsSinceLastProgress;
 
-		if (seconds < SECONDS_IN_MINUTE) {
-			return '~' + Constants.NUMBER_FORMAT.format(seconds) + "sec";
+		if (secondsUntilDone < SECONDS_IN_MINUTE) {
+			return '~' + Constants.NUMBER_FORMAT.format(secondsUntilDone) + "sec";
 		} else {
-			double minutes = seconds / SECONDS_IN_MINUTE;
+			double minutes = secondsUntilDone / SECONDS_IN_MINUTE;
 			return '~' + Constants.NUMBER_FORMAT.format(minutes) + "min";
 		}
 

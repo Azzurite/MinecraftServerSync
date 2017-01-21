@@ -6,12 +6,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 class FTPTransferProgressListener implements CopyStreamListener {
+
 	private static final Logger LOGGER = LoggerFactory.getLogger(FTPTransferProgressListener.class);
 
-	private long currentTotal;
+	private long currentTransferredBytes = Long.MIN_VALUE;
 
-	public long getCurrentTransferTotalBytes() {
-		return currentTotal;
+	/**
+	 * Only valid when used as a difference of different invocations, to get the amount of bytes transfered between two different points in time.
+	 *
+	 * @return
+	 */
+	public long getCurrentTransferredBytes() {
+		return currentTransferredBytes;
 	}
 
 	@Override
@@ -21,6 +27,6 @@ class FTPTransferProgressListener implements CopyStreamListener {
 
 	@Override
 	public void bytesTransferred(long totalBytesTransferred, int bytesTransferred, long streamSize) {
-		currentTotal = totalBytesTransferred;
+		currentTransferredBytes += bytesTransferred;
 	}
 }
