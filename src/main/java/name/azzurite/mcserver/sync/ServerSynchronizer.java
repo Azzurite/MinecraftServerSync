@@ -1,10 +1,6 @@
 package name.azzurite.mcserver.sync;
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -13,6 +9,7 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -21,13 +18,13 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-import java.util.zip.ZipEntry;
 
 import com.jakewharton.byteunits.BinaryByteUnit;
 import name.azzurite.mcserver.config.AppConfig;
 import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.FilteringSaveFileListVisitor;
 import name.azzurite.mcserver.util.LogUtil;
+import name.azzurite.mcserver.util.OnlyContentZipEntrySource;
 import name.azzurite.mcserver.util.SaveFileListVisitor;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -36,7 +33,7 @@ import org.zeroturnaround.zip.ZipEntrySource;
 import org.zeroturnaround.zip.ZipUtil;
 
 import static name.azzurite.mcserver.util.LambdaExceptionUtil.*;
-import static name.azzurite.mcserver.util.StreamUtil.not;
+import static name.azzurite.mcserver.util.StreamUtil.*;
 
 public class ServerSynchronizer {
 
@@ -109,6 +106,16 @@ public class ServerSynchronizer {
 		}
 	}
 
+	private static boolean isSmallFile(Path file) {
+		try {
+			return BinaryByteUnit.BYTES.toKibibytes(Files.size(file)) < SMALL_FILE_THRESHOLD_KB;
+		} catch (IOException e) {
+			LOGGER.warn("Error while calculating file size: {}", e.getMessage());
+			LogUtil.stacktrace(LOGGER, e);
+			return false;
+		}
+	}
+
 	private void extractFile(Path file) {
 		LOGGER.info("Extracting file: {}", file);
 		Path relativePath = appConfig.getSyncPath().relativize(file);
@@ -146,12 +153,13 @@ public class ServerSynchronizer {
 		findLocalServerFiles().forEach(ServerSynchronizer::deleteFile);
 		LOGGER.info("Deleted previous data.");
 		LOGGER.info("Downloading new server files...");
-		SyncActionFuture<List<String>> serverFilesFuture = syncClient.findServerFiles();
-		List<String> serverFiles = AsyncUtil.getResult(serverFilesFuture);
-		serverFiles.stream()
-				.map(rethrow(this::downloadFile))
-				.forEach(rethrow(this::extractFile));
+		SyncActionFuture<Set<String>> serverFilesFuture = syncClient.findServerFiles();
+		Set<String> serverFiles = AsyncUtil.getResult(serverFilesFuture);
+		List<Path> downloadedFiles = downloadFiles(serverFiles);
 		LOGGER.info("Downloaded new server files.");
+		LOGGER.info("Extracting server files...");
+		downloadedFiles.forEach(rethrow(this::extractFile));
+		LOGGER.info("Server files extracted.");
 	}
 
 	private Path backupCurrentFiles() throws IOException {
@@ -171,13 +179,10 @@ public class ServerSynchronizer {
 		return Boolean.parseBoolean(AsyncUtil.getResult(content));
 	}
 
-	private Path downloadFile(String fileName) throws ExecutionException {
-		LOGGER.info("Downloading file '{}'...", fileName);
-		SyncActionFuture<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+	private List<Path> downloadFiles(Collection<String> fileNames) throws ExecutionException {
+		SyncActionFuture<List<Path>> downloadedFileResult = syncClient.downloadFiles(fileNames);
 		new ProgressLogger(downloadedFileResult).logProgress();
-		Path downloadedFile = AsyncUtil.getResult(downloadedFileResult);
-		LOGGER.info("Download finished");
-		return downloadedFile;
+		return AsyncUtil.getResult(downloadedFileResult);
 	}
 
 	public void saveFiles() throws IOException, ExecutionException {
@@ -195,28 +200,20 @@ public class ServerSynchronizer {
 				.toArray(OnlyContentZipEntrySource[]::new);
 		Path smallFilesZip = appConfig.getSyncPath().resolve(SMALL_FILES_ZIP);
 		ZipUtil.pack(smallFileZipEntries, smallFilesZip.toFile());
-		uploadFile(smallFilesZip);
 
-		localServerFiles.stream()
+		List<Path> filesToUpload = localServerFiles.stream()
 				.filter(not(smallFiles::contains))
 				.map(rethrow(this::zipFile))
-				.forEach(rethrow(this::uploadFile));
+				.collect(Collectors.toList());
+
+		filesToUpload.add(smallFilesZip);
+
+		uploadFiles(filesToUpload);
 
 		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false)));
 
 		LOGGER.info("All server files synchronized!");
 	}
-
-	private static boolean isSmallFile(Path file) {
-		try {
-			return BinaryByteUnit.BYTES.toKibibytes(Files.size(file)) < SMALL_FILE_THRESHOLD_KB;
-		} catch (IOException e) {
-			LOGGER.warn("Error while calculating file size: {}", e.getMessage());
-			LogUtil.stacktrace(LOGGER, e);
-			return false;
-		}
-	}
-
 
 	private Path zipFile(Path fileToZip) throws IOException {
 		LOGGER.info("Zipping file: {}", fileToZip);
@@ -239,10 +236,10 @@ public class ServerSynchronizer {
 		return zipFile;
 	}
 
-	private void uploadFile(Path path) throws ExecutionException {
-		LOGGER.info("Uploading file '{}' to server", path);
+	private void uploadFiles(List<Path> paths) throws ExecutionException {
+		LOGGER.info("Uploading server files to server");
 		LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
-		SyncActionFuture<Void> future = syncClient.uploadFile(path);
+		SyncActionFuture<Void> future = syncClient.uploadFiles(paths);
 		new ProgressLogger(future).logProgress();
 		AsyncUtil.getResult(future);
 		LOGGER.info("Upload finished");
@@ -254,37 +251,4 @@ public class ServerSynchronizer {
 		return saveVisitor.getSavedFiles();
 	}
 
-	private static class OnlyContentZipEntrySource implements ZipEntrySource {
-
-		private final String path;
-
-		private final File file;
-
-		OnlyContentZipEntrySource(String path, File file) {
-			this.path = path;
-			this.file = file;
-		}
-
-		@Override
-		public String getPath() {
-			return path;
-		}
-
-		@Override
-		public ZipEntry getEntry() {
-			ZipEntry zipEntry = new ZipEntry(path);
-			if (!file.isDirectory()) {
-				zipEntry.setSize(file.length());
-			}
-			zipEntry.setTime(0L);
-
-			return zipEntry;
-		}
-
-		@SuppressWarnings({"OverlyBroadThrowsClause", "ReturnOfNull"})
-		@Override
-		public InputStream getInputStream() throws IOException {
-			return file.isDirectory() ? null : new BufferedInputStream(new FileInputStream(file));
-		}
-	}
 }

@@ -1,6 +1,5 @@
 package name.azzurite.mcserver.ftp;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -9,8 +8,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,6 +27,7 @@ import name.azzurite.mcserver.sync.SyncActionFuture;
 import name.azzurite.mcserver.sync.SyncClient;
 import name.azzurite.mcserver.util.AsyncUtil;
 import name.azzurite.mcserver.util.LogUtil;
+import name.azzurite.mcserver.util.OnlyContentZipEntrySource;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.net.ftp.FTP;
@@ -31,10 +36,17 @@ import org.apache.commons.net.ftp.FTPConnectionClosedException;
 import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.zeroturnaround.zip.ZipException;
+import org.zeroturnaround.zip.ZipUtil;
 
 import static name.azzurite.mcserver.util.LambdaExceptionUtil.*;
+import static name.azzurite.mcserver.util.StreamUtil.*;
 
 public class FTPSyncClient implements SyncClient {
+
+	private static final String MD5_FILE = "MinecraftServerSync/md5s.zip";
+
+	private static final Path MD5_TEMP_PATH = Paths.get("MinecraftServerSync/md5s");
 
 	private static final int MAX_RETRIES = 3;
 
@@ -212,38 +224,55 @@ public class FTPSyncClient implements SyncClient {
 	}
 
 	@Override
-	public SyncActionFuture<Void> uploadFile(Path path) {
-		LOGGER.debug("Uploading file: {}", path);
+	public SyncActionFuture<Void> uploadFiles(Collection<Path> filePaths) {
+		LOGGER.debug("Uploading files: {}", filePaths);
 
-		try {
-			Path relativeToBase = appConfig.getBaseServerPath().relativize(path);
-			String ftpFileName = toFtpPath(relativeToBase);
-			String ftpMd5FileName = generateMd5FileName(relativeToBase).replaceAll("\\\\", "/");
+		Map<String, byte[]> md5s = retrieveMd5s();
 
-			long fileSize = Files.size(path);
+		List<Path> filesToUpload = filePaths.stream()
+				.filter(filePath -> {
+					Path relativeToBase = appConfig.getSyncPath().relativize(filePath);
+					byte[] remoteMd5 = md5s.get(relativeToBase.toString());
+					return hasEqualMd5(filePath, remoteMd5);
+				})
+				.collect(Collectors.toList());
 
-			Future<Void> uploadResult = perform(() -> {
-				byte[] remoteMd5 = new byte[0];
-				remoteMd5 = retrieveByteFileContents(ftpMd5FileName);
-				byte[] localMd5 = computeMd5(path);
-				if (Arrays.equals(localMd5, remoteMd5)) {
-					LOGGER.debug("Equal MD5, skipping upload.");
-					return;
-				}
+		long totalFileSize = getTotalFileSize(filesToUpload);
 
-				try (InputStream zipFile = Files.newInputStream(path);
-					 InputStream md5File = new ByteArrayInputStream(localMd5)) {
-					ftpStoreFile(ftpFileName, zipFile);
-					ftpStoreFile(ftpMd5FileName, md5File);
+		Future<Void> uploadResult = perform(() -> {
 
-					LOGGER.debug("Uploaded file: {}", path);
-				}
-			});
+			filesToUpload.forEach(rethrow(this::uploadFile));
 
-			return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, ftpFileName + " upload", fileSize);
-		} catch (IOException e) {
-			throw new FTPException(e);
+			storeMd5s(filePaths);
+		});
+
+
+		return new FTPTransferSyncActionFuture<>(uploadResult, progressListener, "server file upload", totalFileSize);
+	}
+
+	private long getTotalFileSize(Collection<Path> filePaths) {
+		return filePaths.stream()
+				.mapToLong(filePath -> {
+					try {
+						return Files.size(filePath);
+					} catch (IOException e) {
+						LOGGER.warn("Error while calculating file sizes. Progress may not be accurate.");
+						LogUtil.stacktrace(LOGGER, e);
+						return 0L;
+					}
+				})
+				.sum();
+	}
+
+	private void uploadFile(Path filePath) throws IOException {
+		LOGGER.debug("Uploading file {}...", filePath);
+		Path relativeToBase = appConfig.getBaseServerPath().relativize(filePath);
+		String ftpFileName = toFtpPath(relativeToBase);
+
+		try (InputStream zipFile = Files.newInputStream(filePath)) {
+			ftpStoreFile(ftpFileName, zipFile);
 		}
+		LOGGER.debug("Uploaded file: {}", ftpFileName);
 	}
 
 	@Override
@@ -261,42 +290,160 @@ public class FTPSyncClient implements SyncClient {
 	}
 
 	@Override
-	public SyncActionFuture<Path> downloadFile(String fileName) {
-		LOGGER.debug("Downloading file {}", fileName);
+	public SyncActionFuture<List<Path>> downloadFiles(Collection<String> fileNames) {
+		LOGGER.debug("Downloading files {}", fileNames);
 
-		long fileSize = getFileSize(fileName);
+		Map<String, byte[]> md5s = retrieveMd5s();
 
-		Future<Path> downloadResult = perform(() -> {
-			Path localPath = appConfig.getBaseServerPath().resolve(fileName);
+		List<String> filesToDownload = fileNames.stream()
+				.filter(remoteFileName -> {
+					Path localPath = toLocalPath(remoteFileName);
+					Path relativeToBase = appConfig.getSyncPath().relativize(localPath);
+					byte[] remoteMd5 = md5s.get(relativeToBase.toString());
+					return hasEqualMd5(localPath, remoteMd5);
+				})
+				.collect(Collectors.toList());
 
-			try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream()) {
-				String md5FileName = generateMd5FileName(Paths.get(fileName));
+		long totalFileSize = getTotalRemoteFileSize(filesToDownload);
 
-				ftpClient.retrieveFile(md5FileName, byteStream);
-				logFtpCommand(ftpClient, "retrieveFile", fileName);
+		Future<List<Path>> downloadResult = perform(() -> {
+			filesToDownload.stream()
+					.map(rethrow(this::downloadFile))
+					.collect(Collectors.toList());
 
-				byte[] remoteMd5 = byteStream.toByteArray();
-				byte[] localMd5 = computeMd5(localPath);
-				if (Arrays.equals(remoteMd5, localMd5)) {
-					LOGGER.debug("Equal MD5, skipping download.");
-				} else {
-					try (FileOutputStream fileStream = new FileOutputStream(localPath.toFile())) {
-						ftpClient.retrieveFile(fileName, fileStream);
-						logFtpCommand(ftpClient, "retrieveFile", fileName);
-					}
-				}
-			}
-
-			return localPath;
+			return fileNames.stream()
+					.map(this::toLocalPath)
+					.collect(Collectors.toList());
 		});
 
-		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, fileName + " download", fileSize);
+		return new FTPTransferSyncActionFuture<>(downloadResult, progressListener, "server file download", totalFileSize);
+	}
+
+	private boolean hasEqualMd5(Path localFile, byte[] md5) {
+		try {
+			Path relativeToBase = appConfig.getSyncPath().relativize(localFile);
+			LOGGER.debug("Comparing MD5s for file '{}'...", localFile);
+			byte[] localMd5 = computeMd5(localFile);
+			if (Arrays.equals(md5, localMd5)) {
+				LOGGER.debug("Equal MD5s, skipping upload/download.");
+				return false;
+			}
+		} catch (IOException e) {
+			LOGGER.debug("Error while computing MD5...");
+			LogUtil.stacktrace(LOGGER, e);
+		}
+		LOGGER.debug("Differing MD5s, uploading/downloading...");
+		return true;
+	}
+
+	private Path toLocalPath(String remoteFileName) {
+		return Paths.get(appConfig.getBaseServerPath().toString(), remoteFileName.replaceAll("/", "\\\\"));
+	}
+
+	private long getTotalRemoteFileSize(Collection<String> fileNames) {
+		try {
+			Future<Long> fileSizeResult = perform(() -> {
+				return fileNames.stream()
+						.map(rethrow((String fileName) -> {
+							FTPFile[] ftpFiles = ftpClient.listFiles(fileName);
+							if (ftpFiles.length != 1 || !ftpFiles[0].isFile()) {
+								return 0L;
+							} else {
+								return ftpFiles[0].getSize();
+							}
+						}))
+						.mapToLong(Long::valueOf)
+						.sum();
+			});
+			return AsyncUtil.getResult(fileSizeResult);
+		} catch (ExecutionException e) {
+			LOGGER.warn("Error while calculating download file size, progress will not be available.");
+			LogUtil.stacktrace(LOGGER, e);
+			return 0;
+		}
+	}
+
+	private Map<String, byte[]> retrieveMd5s() {
+		try {
+			Future<Path> md5FileFuture = perform(() -> downloadFile(MD5_FILE));
+
+			Path md5File = AsyncUtil.getResult(md5FileFuture);
+			Path md5TempPath = appConfig.getBaseServerPath().resolve(MD5_TEMP_PATH);
+
+			ZipUtil.unpack(md5File.toFile(), md5TempPath.toFile());
+
+			return Files.walk(md5TempPath)
+					.collect(
+							HashMap<String, byte[]>::new,
+							(map, path) -> {
+								try {
+									Path relativeToBase = md5TempPath.relativize(path);
+									String fileName = relativeToBase.getFileName().toString().replaceAll("\\.md5$", "");
+									if (relativeToBase.getParent() != null) {
+										fileName = relativeToBase.getParent().resolve(fileName).toString();
+									}
+									byte[] md5 = Files.readAllBytes(path);
+									map.put(fileName, md5);
+								} catch (IOException ignored) {
+								}
+							},
+							HashMap::putAll
+					);
+		} catch (IOException | ExecutionException | ZipException e) {
+			LOGGER.warn("Error while creating MD5 table");
+			LogUtil.stacktrace(LOGGER, e);
+			return Collections.emptyMap();
+		}
+	}
+
+
+	private void storeMd5s(Collection<Path> filePaths) throws IOException {
+		Path md5TempPath = appConfig.getBaseServerPath().resolve(MD5_TEMP_PATH);
+		filePaths.forEach(filePath -> {
+			try {
+				Path dirRelativeToBase = appConfig.getSyncPath().relativize(filePath.getParent());
+				Path md5FilePath = md5TempPath.resolve(dirRelativeToBase).resolve(filePath.getFileName() + ".md5");
+
+				Files.createDirectories(md5FilePath.getParent());
+
+				Files.write(md5FilePath, computeMd5(filePath));
+			} catch (IOException e) {
+				LOGGER.warn("Error while computing md5.");
+				LogUtil.stacktrace(LOGGER, e);
+			}
+		});
+
+		OnlyContentZipEntrySource[] zipEntries = Files.walk(md5TempPath)
+				.filter(not(Files::isDirectory))
+				.map(file -> {
+					Path relativeToBase = md5TempPath.relativize(file);
+					return new OnlyContentZipEntrySource(relativeToBase.toString(), file.toFile());
+				})
+				.toArray(OnlyContentZipEntrySource[]::new);
+
+		Path md5File = appConfig.getBaseServerPath().resolve(MD5_FILE);
+		ZipUtil.pack(zipEntries, md5File.toFile());
+
+		ftpStoreFile(MD5_FILE, Files.newInputStream(md5File));
+	}
+
+
+	private Path downloadFile(String remoteFileName) throws IOException {
+		Path localPath = toLocalPath(remoteFileName);
+
+		try (FileOutputStream fileStream = new FileOutputStream(localPath.toFile())) {
+			ftpClient.retrieveFile(remoteFileName, fileStream);
+			logFtpCommand(ftpClient, "retrieveFile", remoteFileName);
+		}
+
+		return localPath;
 	}
 
 	@Override
-	public SyncActionFuture<List<String>> findServerFiles() {
-		Future<List<String>> findServerFilesResult = perform(() -> {
-			return listFilesRecursively(toFtpPath(appConfig.getBaseServerPath().relativize(appConfig.getSyncPath())));
+	public SyncActionFuture<Set<String>> findServerFiles() {
+		Future<Set<String>> findServerFilesResult = perform(() -> {
+			String serverFilesDirectory = toFtpPath(appConfig.getBaseServerPath().relativize(appConfig.getSyncPath()));
+			return listFilesRecursively(serverFilesDirectory).keySet();
 		});
 
 		return new NoProgressSyncActionFuture<>("list server files", findServerFilesResult);
@@ -325,25 +472,25 @@ public class FTPSyncClient implements SyncClient {
 		logFtpCommand(ftpClient, "makeDirectory", dir);
 	}
 
-	private List<String> listFilesRecursively(String directory) throws IOException {
+	private Map<String, FTPFile> listFilesRecursively(String directory) throws IOException {
 		FTPFile[] listFiles = ftpClient.listFiles(directory);
 		List<FTPFile> ftpFiles = Arrays.asList(listFiles);
 
-		List<String> curFiles = ftpFiles.stream()
+		Map<String, FTPFile> fileMap = new HashMap<>();
+
+		ftpFiles.stream()
 				.filter(FTPFile::isFile)
 				.filter(file -> !file.getName().endsWith(".md5"))
-				.map(file -> directory + '/' + file.getName())
-				.collect(Collectors.toList());
+				.forEach(file -> {
+					fileMap.put(directory + '/' + file.getName(), file);
+				});
 
-		List<String> subDirectoryFiles = ftpFiles.stream()
+		ftpFiles.stream()
 				.filter(FTPFile::isDirectory)
 				.map(rethrow((FTPFile dir) -> listFilesRecursively(directory + '/' + dir.getName())))
-				.flatMap(List::stream)
-				.collect(Collectors.toList());
+				.forEach(fileMap::putAll);
 
-		curFiles.addAll(subDirectoryFiles);
-
-		return curFiles;
+		return fileMap;
 	}
 
 	private <R> Future<R> retry(FTPAction<R> action, FTPVoidAction onFail) {
