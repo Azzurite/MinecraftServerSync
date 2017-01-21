@@ -1,34 +1,31 @@
 package name.azzurite.mcserver.sync;
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.zip.ZipEntry;
 
+import com.jakewharton.byteunits.BinaryByteUnit;
 import name.azzurite.mcserver.config.AppConfig;
-import name.azzurite.mcserver.ftp.FTPSyncClient;
 import name.azzurite.mcserver.util.AsyncUtil;
+import name.azzurite.mcserver.util.FilteringSaveFileListVisitor;
 import name.azzurite.mcserver.util.LogUtil;
+import name.azzurite.mcserver.util.OnlyContentZipEntrySource;
+import name.azzurite.mcserver.util.SaveFileListVisitor;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,30 +37,21 @@ import static name.azzurite.mcserver.util.StreamUtil.*;
 
 public class ServerSynchronizer {
 
+	static final Set<String> IGNORE_FILES = new HashSet<>();
 	private static final Logger LOGGER = LoggerFactory.getLogger(ServerSynchronizer.class);
-	private static final String SERVER_IP_FILE = "runningServer";
-	private static final Map<String, List<String>> ZIP_FILES = new HashMap<>();
-	private static final String SAVE_IN_PROGRESS_FILE_NAME = "uploadInProgress";
+	private static final String SERVER_IP_FILE = "MinecraftServerSync/runningServer";
+	private static final String SAVE_IN_PROGRESS_FILE_NAME = "MinecraftServerSync/uploadInProgress";
 	private static final long SECONDS_10 = 10000L;
+	private static final Path BACKUP_FILE_ZIP = Paths.get("backup.zip");
+	private static final Path SMALL_FILES_ZIP = Paths.get("smallFilesSync.zip");
+	private static final int SMALL_FILE_THRESHOLD_KB = 20;
 
 	static {
-		ZIP_FILES.put("map.zip", Arrays.asList("rolfswudel", "rolfswudel_nether", "rolfswudel_the_end"));
-		ZIP_FILES.put("server.zip", Arrays.asList("spigot.jar", "plugins"));
-		ZIP_FILES.put("config.zip",
-				Arrays.asList("banned-ips.json", "banned-players.json", "ops.json", "usercache.json", "whitelist.json",
-						"server.properties", "eula.txt", "run.bat", "bukkit.yml", "commands.yml", "help.yml",
-						"permissions.yml", "spigot.yml"));
+		IGNORE_FILES.addAll(Arrays.asList("MinecraftServerSync", "logs"));
 	}
 
 	private final AppConfig appConfig;
 	private final SyncClient syncClient;
-
-	public static void main(String[] args) throws IOException, ExecutionException {
-		AppConfig appConfig = AppConfig.readConfig();
-		FTPSyncClient ftpSyncClient = new FTPSyncClient(appConfig);
-		ServerSynchronizer sync = new ServerSynchronizer(appConfig, ftpSyncClient);
-		sync.retrieveFiles();
-	}
 
 	public ServerSynchronizer(AppConfig appConfig, SyncClient syncClient) {
 		this.appConfig = appConfig;
@@ -101,63 +89,7 @@ public class ServerSynchronizer {
 		}
 	}
 
-	private void extractFile(Path file) {
-		LOGGER.info("Extracting file: {}", file);
-		ZipUtil.unpack(file.toFile(), appConfig.getBaseServerPath().toFile());
-		LOGGER.info("Extract finished");
-	}
-
-	public Optional<String> getServerIp() throws ExecutionException {
-		String serverIp = AsyncUtil.getResult(syncClient.retrieveFileContents(SERVER_IP_FILE));
-
-		return StringUtils.isEmpty(serverIp) ? Optional.empty() : Optional.of(serverIp);
-	}
-
-	public void setServerIp(String ip) throws IOException {
-		LOGGER.info("Publishing server IP {}", ip);
-		syncClient.setFileContents(SERVER_IP_FILE, ip);
-	}
-
-	public void deleteServerIp() throws IOException {
-		LOGGER.info("Depublishing server IP");
-		syncClient.deleteFile(SERVER_IP_FILE);
-	}
-
-	public void retrieveFiles() throws ExecutionException, IOException {
-		while (isUploadInProgress()) {
-			LOGGER.info("Someone is still uploading the server files. Waiting for completion...");
-			AsyncUtil.threadSleep(SECONDS_10);
-		}
-
-
-		Predicate<String> doesFileExist = rethrow((String file) -> {
-			Future<Boolean> futureResult = syncClient.doesFileExist(file);
-			Boolean result = AsyncUtil.getResult(futureResult);
-			return (result != null) && result;
-		});
-
-		Set<String> existingZipFiles = ZIP_FILES.keySet().stream()
-				.filter(doesFileExist)
-				.collect(Collectors.toSet());
-		LOGGER.info("Backing up previous data");
-		backupCurrentFiles(existingZipFiles);
-		LOGGER.info("Backed up previous data");
-		LOGGER.info("Deleting previous data");
-		existingZipFiles.stream()
-				.map(ZIP_FILES::get)
-				.flatMap(Collection::stream)
-				.forEach(this::deleteFile);
-		LOGGER.info("Deleted previous data");
-		LOGGER.info("Downloading new server files");
-		existingZipFiles.stream()
-				.filter(doesFileExist)
-				.map(rethrow(this::downloadFile))
-				.forEach(rethrow(this::extractFile));
-		LOGGER.info("Downloaded new server files");
-	}
-
-	private void deleteFile(String fileToDelete) {
-		Path pathToDelete = appConfig.getBaseServerPath().resolve(fileToDelete);
+	private static void deleteFile(Path pathToDelete) {
 		if (!Files.exists(pathToDelete, LinkOption.NOFOLLOW_LINKS)) {
 			return;
 		}
@@ -168,28 +100,78 @@ public class ServerSynchronizer {
 			try {
 				Files.delete(pathToDelete);
 			} catch (IOException e) {
-				LOGGER.warn("Could not delete file {}", fileToDelete);
+				LOGGER.warn("Could not delete file {}", pathToDelete);
 				LogUtil.stacktrace(LOGGER, e);
 			}
 		}
 	}
 
-	private void backupCurrentFiles(Iterable<String> zippedFiles) throws IOException {
-		Map<String, List<String>> zipFileMap = new HashMap<>();
-		zippedFiles.forEach((zippedFile) -> {
-			List<String> filesToBackup = ZIP_FILES.get(zippedFile);
-			Optional<Path> missingFile = filesToBackup.stream()
-					.map(appConfig.getBaseServerPath()::resolve)
-					.filter(not(Files::exists))
-					.findAny();
-			if (missingFile.isPresent()) {
-				LOGGER.warn("Can not backup {}, required files are missing.", zippedFile);
-			} else {
-				zipFileMap.put("backup_" + zippedFile, filesToBackup);
-			}
-		});
+	private static boolean isSmallFile(Path file) {
+		try {
+			return BinaryByteUnit.BYTES.toKibibytes(Files.size(file)) < SMALL_FILE_THRESHOLD_KB;
+		} catch (IOException e) {
+			LOGGER.warn("Error while calculating file size: {}", e.getMessage());
+			LogUtil.stacktrace(LOGGER, e);
+			return false;
+		}
+	}
 
-		zipFiles(zipFileMap);
+	private void extractFile(Path file) {
+		LOGGER.info("Extracting file: {}", file);
+		Path relativePath = appConfig.getSyncPath().relativize(file);
+		Path parentBaseDir = appConfig.getBaseServerPath().resolve(relativePath).getParent();
+		ZipUtil.unpack(file.toFile(), parentBaseDir.toFile());
+		LOGGER.info("Extract finished");
+	}
+
+	public Optional<String> getServerIp() throws ExecutionException {
+		String serverIp = AsyncUtil.getResult(syncClient.retrieveFileContents(SERVER_IP_FILE));
+
+		return StringUtils.isEmpty(serverIp) ? Optional.empty() : Optional.of(serverIp);
+	}
+
+	public void setServerIp(String ip) throws IOException, ExecutionException {
+		LOGGER.info("Publishing server IP {}", ip);
+		AsyncUtil.getResult(syncClient.setFileContents(SERVER_IP_FILE, ip));
+	}
+
+	public void deleteServerIp() throws IOException, ExecutionException {
+		LOGGER.info("Depublishing server IP");
+		AsyncUtil.getResult(syncClient.deleteFile(SERVER_IP_FILE));
+	}
+
+	public void retrieveFiles() throws ExecutionException, IOException {
+		while (isUploadInProgress()) {
+			LOGGER.info("Someone is still uploading the server files. Waiting for completion...");
+			AsyncUtil.threadSleep(SECONDS_10);
+		}
+
+		LOGGER.info("Backing up previous data...");
+		Path backupZip = backupCurrentFiles();
+		LOGGER.info("Backed up previous data at '{}'.", backupZip);
+		LOGGER.info("Deleting previous data...");
+		findLocalServerFiles().forEach(ServerSynchronizer::deleteFile);
+		LOGGER.info("Deleted previous data.");
+		LOGGER.info("Downloading new server files...");
+		SyncActionFuture<Set<String>> serverFilesFuture = syncClient.findServerFiles();
+		Set<String> serverFiles = AsyncUtil.getResult(serverFilesFuture);
+		List<Path> downloadedFiles = downloadFiles(serverFiles);
+		LOGGER.info("Downloaded new server files.");
+		LOGGER.info("Extracting server files...");
+		downloadedFiles.forEach(rethrow(this::extractFile));
+		LOGGER.info("Server files extracted.");
+	}
+
+	private Path backupCurrentFiles() throws IOException {
+		OnlyContentZipEntrySource[] zipEntries = findLocalServerFiles().stream()
+				.map(file -> {
+					Path relativeToBase = appConfig.getBaseServerPath().relativize(file);
+					return new OnlyContentZipEntrySource(relativeToBase.toString(), file.toFile());
+				})
+				.toArray(OnlyContentZipEntrySource[]::new);
+		Path backupZip = appConfig.getBackupPath().resolve(BACKUP_FILE_ZIP);
+		ZipUtil.pack(zipEntries, backupZip.toFile());
+		return backupZip;
 	}
 
 	private boolean isUploadInProgress() throws ExecutionException {
@@ -197,92 +179,76 @@ public class ServerSynchronizer {
 		return Boolean.parseBoolean(AsyncUtil.getResult(content));
 	}
 
-	private Path downloadFile(String fileName) throws ExecutionException {
-		LOGGER.info("Downloading file '{}'...", fileName);
-		SyncActionFuture<Path> downloadedFileResult = syncClient.downloadFile(fileName);
+	private List<Path> downloadFiles(Collection<String> fileNames) throws ExecutionException {
+		SyncActionFuture<List<Path>> downloadedFileResult = syncClient.downloadFiles(fileNames);
 		new ProgressLogger(downloadedFileResult).logProgress();
-		Path downloadedFile = AsyncUtil.getResult(downloadedFileResult);
-		LOGGER.info("Download finished");
-		return downloadedFile;
+		return AsyncUtil.getResult(downloadedFileResult);
 	}
 
-	public void saveFiles() throws IOException {
-		syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true));
-		List<Path> paths = zipFiles(ZIP_FILES);
-		uploadFiles(paths);
-		syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false));
+	public void saveFiles() throws IOException, ExecutionException {
+		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true)));
+
+		List<Path> localServerFiles = findLocalServerFiles();
+		List<Path> smallFiles = localServerFiles.stream()
+				.filter(ServerSynchronizer::isSmallFile)
+				.collect(Collectors.toList());
+		OnlyContentZipEntrySource[] smallFileZipEntries = smallFiles.stream()
+				.map(smallFile -> {
+					Path relativeToBase = appConfig.getBaseServerPath().relativize(smallFile);
+					return new OnlyContentZipEntrySource(relativeToBase.toString(), smallFile.toFile());
+				})
+				.toArray(OnlyContentZipEntrySource[]::new);
+		Path smallFilesZip = appConfig.getSyncPath().resolve(SMALL_FILES_ZIP);
+		ZipUtil.pack(smallFileZipEntries, smallFilesZip.toFile());
+
+		List<Path> filesToUpload = localServerFiles.stream()
+				.filter(not(smallFiles::contains))
+				.map(rethrow(this::zipFile))
+				.collect(Collectors.toList());
+
+		filesToUpload.add(smallFilesZip);
+
+		uploadFiles(filesToUpload);
+
+		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false)));
+
 		LOGGER.info("All server files synchronized!");
 	}
 
-	private List<Path> zipFiles(Map<String, List<String>> zippedFiles) throws IOException {
-		return zippedFiles.entrySet().stream()
-				.map(rethrow(this::zipFile))
-				.collect(Collectors.toList());
-	}
+	private Path zipFile(Path fileToZip) throws IOException {
+		LOGGER.info("Zipping file: {}", fileToZip);
 
-	private Path zipFile(Map.Entry<String, List<String>> zipFileDescriptor) throws IOException {
-		Path zipFile = appConfig.getSyncPath().resolve(zipFileDescriptor.getKey());
+		Path fileRelativeToBase = appConfig.getBaseServerPath().relativize(fileToZip);
+		String fileName = fileToZip.getFileName().toString();
+		Path zipFilePath = appConfig.getSyncPath();
+		if (fileRelativeToBase.getParent() != null) {
+			zipFilePath = zipFilePath.resolve(fileRelativeToBase.getParent());
+		}
+		Files.createDirectories(zipFilePath);
+		Path zipFile = zipFilePath.resolve(fileName + ".zip");
 
-		ZipEntrySource[] filesToZip = zipFileDescriptor.getValue().stream()
-				.map(appConfig.getBaseServerPath()::resolve)
-				.map(rethrow(ServerSynchronizer::pathToFileList))
-				.flatMap(List::stream)
-				.map(path -> {
-					Path relativePath = appConfig.getBaseServerPath().relativize(path);
-					return new OnlyContentZipEntrySource(relativePath.toString(), path.toFile());
-				})
-				.toArray(ZipEntrySource[]::new);
+		ZipEntrySource[] filesToZip = {new OnlyContentZipEntrySource(fileName, fileToZip.toFile())};
 
-
-		LOGGER.info("Zipping file: {}", zipFile);
 		ZipUtil.pack(filesToZip, zipFile.toFile());
+
 		LOGGER.info("File zipped: {}", zipFile);
 
 		return zipFile;
 	}
 
-	private void uploadFiles(Iterable<Path> paths) {
-		paths.forEach((path) -> {
-			LOGGER.info("Uploading file '{}' to server", path);
-			LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
-			SyncActionFuture<Void> future = syncClient.uploadFile(path);
-			new ProgressLogger(future).logProgress();
-			LOGGER.info("Upload finished");
-		});
+	private void uploadFiles(List<Path> paths) throws ExecutionException {
+		LOGGER.info("Uploading server files to server");
+		LOGGER.warn("WAIT FOR THIS TO FINISH OR ELSE THE SERVER FILES WILL BE CORRUPTED!");
+		SyncActionFuture<Void> future = syncClient.uploadFiles(paths);
+		new ProgressLogger(future).logProgress();
+		AsyncUtil.getResult(future);
+		LOGGER.info("Upload finished");
 	}
 
-	private static class OnlyContentZipEntrySource implements ZipEntrySource {
-
-		private final String path;
-
-		private final File file;
-
-		OnlyContentZipEntrySource(String path, File file) {
-			this.path = path;
-			this.file = file;
-		}
-
-		@Override
-		public String getPath() {
-			return path;
-		}
-
-		@Override
-		public ZipEntry getEntry() {
-			ZipEntry zipEntry = new ZipEntry(path);
-			if (!file.isDirectory()) {
-				zipEntry.setSize(file.length());
-			}
-			zipEntry.setTime(0L);
-
-			return zipEntry;
-		}
-
-		@SuppressWarnings({"OverlyBroadThrowsClause", "ReturnOfNull"})
-		@Override
-		public InputStream getInputStream() throws IOException {
-			return file.isDirectory() ? null : new BufferedInputStream(new FileInputStream(file));
-		}
+	private List<Path> findLocalServerFiles() throws IOException {
+		SaveFileListVisitor saveVisitor = new FilteringSaveFileListVisitor(appConfig.getBaseServerPath(), IGNORE_FILES);
+		Files.walkFileTree(appConfig.getBaseServerPath(), saveVisitor);
+		return saveVisitor.getSavedFiles();
 	}
 
 }
