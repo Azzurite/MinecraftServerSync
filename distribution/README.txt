@@ -8,6 +8,5 @@ ReadMe for MinecraftServerSync v${project.version}
 
 ====== Usage =======
 1. Read and edit config.properties
-2. Launch the server/Minecraft with launch.bat
-3. Stop the actual server whenever you want by typing "stop" in the console window (DO NOT SIMPLY PRESS THE X IN THE TOP RIGHT CORNER)
-4. Wait for minecraft-server-sync to shut down by itself so everything will be synched
+2. Launch MinecraftServerSync by executing start.bat
+3. Start Server/Minecraft as necessary. The GUI should be self-explanatory.

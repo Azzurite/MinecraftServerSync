@@ -108,7 +108,7 @@
 					<archive>
 						<manifest>
 							<addClasspath>true</addClasspath>
-							<mainClass>name.azzurite.mcserver.Main</mainClass>
+							<mainClass>name.azzurite.mcserver.MinecraftServerSync</mainClass>
 						</manifest>
 					</archive>
 				</configuration>
