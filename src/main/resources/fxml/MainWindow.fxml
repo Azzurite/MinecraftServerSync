@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.shape.*?>
+<?import javafx.scene.text.*?>
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import java.lang.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane fx:id="root" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1" fx:controller="name.azzurite.mcserver.view.MainWindow">
+   <left>
+      <GridPane BorderPane.alignment="CENTER">
+        <columnConstraints>
+          <ColumnConstraints hgrow="SOMETIMES" />
+        </columnConstraints>
+        <rowConstraints>
+          <RowConstraints vgrow="ALWAYS" />
+          <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
+        </rowConstraints>
+         <children>
+            <TitledPane animated="false" expanded="false" prefWidth="150.0" text="Manual override" visible="false" GridPane.rowIndex="1">
+               <content>
+                  <VBox fx:id="overrideMenu" spacing="4.0">
+                     <children>
+                        <Label text="Warning: &#10;Only use these if you&#10;know what you're doing!" textAlignment="CENTER" textFill="RED" wrapText="true" />
+                     </children></VBox>
+               </content>
+            </TitledPane>
+            <VBox fx:id="menu" prefWidth="150.0" spacing="4.0" />
+         </children>
+      </GridPane>
+   </left>
+   <top>
+      <GridPane fx:id="topBar" hgap="30.0" BorderPane.alignment="CENTER">
+        <columnConstraints>
+          <ColumnConstraints fillWidth="false" halignment="LEFT" hgrow="SOMETIMES" maxWidth="1.7976931348623157E308" minWidth="10.0" />
+          <ColumnConstraints fillWidth="false" halignment="RIGHT" hgrow="SOMETIMES" maxWidth="1.7976931348623157E308" minWidth="10.0" />
+        </columnConstraints>
+        <rowConstraints>
+          <RowConstraints fillHeight="false" maxHeight="30.0" minHeight="10.0" prefHeight="30.0" valignment="CENTER" vgrow="SOMETIMES" />
+        </rowConstraints>
+      </GridPane>
+   </top>
+</BorderPane>

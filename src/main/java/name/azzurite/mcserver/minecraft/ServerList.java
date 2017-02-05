@@ -17,7 +17,6 @@ import com.flowpowered.nbt.ListTag;
 import com.flowpowered.nbt.Tag;
 import com.flowpowered.nbt.stream.NBTInputStream;
 import com.flowpowered.nbt.stream.NBTOutputStream;
-import name.azzurite.mcserver.Server;
 import name.azzurite.mcserver.config.AppConfig;
 import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
@@ -36,18 +35,17 @@ public final class ServerList {
 
 	private ServerList() {}
 
-	public static void addOrReplace(Server serverToAdd) {
+	public static void addOrReplace(String ip) {
 		Collection<ServerListEntry> servers = new ArrayList<>(readServerList());
 
 		Optional<ServerListEntry> existingServer = servers.stream()
 				.filter(server -> ROLFSWUDEL_SERVER_NAME.equals(server.getName()))
 				.findAny();
 
-		String newIp = serverToAdd.getIp();
 		if (existingServer.isPresent()) {
-			existingServer.get().setIp(newIp);
+			existingServer.get().setIp(ip);
 		} else {
-			servers.add(new ServerListEntry(ROLFSWUDEL_SERVER_NAME, newIp));
+			servers.add(new ServerListEntry(ROLFSWUDEL_SERVER_NAME, ip));
 		}
 
 		saveServerList(servers);

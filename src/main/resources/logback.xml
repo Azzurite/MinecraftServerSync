@@ -11,6 +11,9 @@
 	</appender>
 
 	<appender name="FILE" class="ch.qos.logback.core.FileAppender">
+		<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+			<level>DEBUG</level>
+		</filter>
 		<file>MinecraftServerSync.log</file>
 		<append>false</append>
 
@@ -19,7 +22,7 @@
 		</encoder>
 	</appender>
 
-	<logger name="name.azzurite.mcserver" level="DEBUG">
+	<logger name="name.azzurite.mcserver" level="TRACE">
 		<appender-ref ref="FILE"/>
 	</logger>
 	<root level="INFO">

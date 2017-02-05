@@ -1,0 +1,44 @@
+.tool-bar {
+    -fx-background-color: none;
+}
+
+#menu {
+    -fx-border-color: -fx-box-border #ddd #ddd #ddd;
+    -fx-border-insets: -1 0 0 0;
+    -fx-border-width: 0 1 0 0;
+}
+
+#overrideMenu, #menu {
+    -fx-padding: 5px;
+}
+
+#topBar {
+    -fx-border-color: #ddd;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 10px;
+}
+
+#serverStatusLabel {
+    -fx-font-weight: bold;
+}
+
+#console {
+    -fx-background-insets: 0;
+}
+
+#console .scroll-pane {
+    -fx-padding: 0;
+}
+
+#console .scroll-bar, #console .corner {
+    -fx-background-insets: 0;
+}
+
+#console .content {
+    -fx-background-color: none;
+}
+
+#console .viewport {
+}
+
+

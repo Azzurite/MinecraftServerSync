@@ -1,3 +1,3 @@
 @ECHO OFF
 
-java -jar "%~dp0\lib\${project.build.finalName}.jar"
+start "" javaw -jar "%~dp0\lib\${project.build.finalName}.jar"
