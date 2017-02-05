@@ -159,7 +159,7 @@ public class ServerSynchronizer {
 			AsyncUtil.threadSleep(SECONDS_10);
 		}
 
-		Path backupZip = backupCurrentFiles();
+		backupCurrentFiles();
 
 		Set<String> serverFiles = searchOnlineServerFiles();
 
@@ -192,7 +192,7 @@ public class ServerSynchronizer {
 		return serverFiles;
 	}
 
-	private Path backupCurrentFiles() throws IOException {
+	private void backupCurrentFiles() throws IOException {
 		LOGGER.info("Backing up previous data...");
 
 		OnlyContentZipEntrySource[] zipEntries = findLocalServerFiles().stream()
@@ -205,7 +205,6 @@ public class ServerSynchronizer {
 		ZipUtil.pack(zipEntries, backupZip.toFile());
 
 		LOGGER.info("Backed up previous data at '{}'.", backupZip);
-		return backupZip;
 	}
 
 	boolean isUploadInProgress() throws ExecutionException {
@@ -225,7 +224,7 @@ public class ServerSynchronizer {
 	}
 
 	public void saveFiles() throws IOException, ExecutionException {
-		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true)));
+		setUploadInProgressFlag();
 
 		List<Path> localServerFiles = findLocalServerFiles();
 
@@ -233,9 +232,17 @@ public class ServerSynchronizer {
 
 		uploadFiles(filesToUpload);
 
-		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false)));
+		removeUploadInProgressFlag();
 
 		LOGGER.info("All server files synchronized!");
+	}
+
+	public void removeUploadInProgressFlag() throws ExecutionException {
+		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(false)));
+	}
+
+	private void setUploadInProgressFlag() throws ExecutionException {
+		AsyncUtil.getResult(syncClient.setFileContents(SAVE_IN_PROGRESS_FILE_NAME, String.valueOf(true)));
 	}
 
 	private List<Path> zipServerFiles(Collection<Path> localServerFiles) {

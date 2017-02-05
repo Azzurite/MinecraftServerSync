@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import name.azzurite.mcserver.config.AppConfig;
 import name.azzurite.mcserver.console.LocalConsole;
 import name.azzurite.mcserver.sync.ServerSynchronizer;
@@ -31,15 +33,16 @@ public class SyncingLocalServer implements Server {
 
 	private final List<Runnable> onCloseCallbacks = new ArrayList<>();
 
-	private boolean running;
+	private ObjectProperty<SyncingLocalServerStatus> status = new SimpleObjectProperty<>(SyncingLocalServerStatus.RETRIEVING_FILES);
 
 	public SyncingLocalServer(AppConfig appConfig, ServerSynchronizer sync, LocalConsole console) throws IOException, ExecutionException {
 		this.appConfig = appConfig;
 		this.sync = sync;
 		this.console = console;
+
 		localServer = createLocalServer();
+
 		localServer.addOnCloseCallback(rethrow(this::close));
-		running = true;
 	}
 
 	private static String retrieveExternalIP() throws MalformedURLException {
@@ -59,7 +62,7 @@ public class SyncingLocalServer implements Server {
 
 	@Override
 	public boolean isRunning() {
-		return running;
+		return status.get() != SyncingLocalServerStatus.OFFLINE;
 	}
 
 	@Override
@@ -69,19 +72,20 @@ public class SyncingLocalServer implements Server {
 
 	@Override
 	public void close() throws IOException {
-		if (!running) {
+		if (status.get() == SyncingLocalServerStatus.OFFLINE || status.get() == SyncingLocalServerStatus.SAVING_FILES) {
 			return;
 		}
 
 		localServer.close();
 
 		try {
+			status.set(SyncingLocalServerStatus.SAVING_FILES);
 			sync.saveFiles();
 			sync.deleteServerIp();
 		} catch (ExecutionException e) {
 			throw new IOException(e);
 		} finally {
-			running = false;
+			status.set(SyncingLocalServerStatus.OFFLINE);
 			onCloseCallbacks.forEach(Runnable::run);
 		}
 	}
@@ -91,7 +95,24 @@ public class SyncingLocalServer implements Server {
 		sync.retrieveFiles();
 		sync.setServerIp(retrieveExternalIP());
 
+		status.set(SyncingLocalServerStatus.RUNNING);
+
 		return new LocalServer(appConfig, sync, console);
 	}
 
+
+	public SyncingLocalServerStatus getStatus() {
+		return status.get();
+	}
+
+	public ObjectProperty<SyncingLocalServerStatus> statusProperty() {
+		return status;
+	}
+
+	public enum SyncingLocalServerStatus {
+		OFFLINE,
+		RUNNING,
+		RETRIEVING_FILES,
+		SAVING_FILES;
+	}
 }

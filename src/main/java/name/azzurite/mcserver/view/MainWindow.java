@@ -10,13 +10,8 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
-import name.azzurite.mcserver.config.AppConfig;
-import name.azzurite.mcserver.console.LocalConsole;
-import name.azzurite.mcserver.server.LocalServerService;
-import name.azzurite.mcserver.sync.ServerInfoService;
-import name.azzurite.mcserver.sync.ServerSynchronizer;
-import name.azzurite.mcserver.updates.UpdateChecker;
 import name.azzurite.mcserver.util.FXUtil;
+import name.azzurite.mcserver.view.override.OverrideMenu;
 
 public final class MainWindow {
 
@@ -32,17 +27,19 @@ public final class MainWindow {
 	@FXML
 	private VBox overrideMenu;
 
-	public static MainWindow create(Stage primaryStage, AppConfig appConfig, ServerSynchronizer sync, ServerInfoService serverInfoService,
-			UpdateChecker updateChecker, LocalServerService serverRunner, LocalConsole console) throws IOException {
+	public static MainWindow create(Stage primaryStage, ConsoleView consoleView, UpdateDisplay updateDisplay, ServerStatusDisplay
+			serverStatusDisplay, ServerButton serverButton, StartMinecraftButton startMinecraftButton, OverrideMenu overrideMenu) throws
+			IOException {
 		primaryStage.setTitle("MinecraftServerSync");
 		primaryStage.getIcons().add(FXUtil.retrieveClassPathImage("icon.png"));
 
 		MainWindow mainWindow = FXUtil.createFXMLController(MainWindow.class);
-		createConsoleView(mainWindow, console);
-		createUpdateDisplay(mainWindow, appConfig, updateChecker);
-		createServerStatusDisplay(mainWindow, serverInfoService);
-		createServerButton(mainWindow, serverInfoService, serverRunner);
-		createStartMinecraftButton(mainWindow, appConfig, serverInfoService);
+		addToMainWindow(mainWindow, consoleView);
+		addToMainWindow(mainWindow, updateDisplay);
+		addToMainWindow(mainWindow, serverStatusDisplay);
+		addToMainWindow(mainWindow, serverButton);
+		addToMainWindow(mainWindow, startMinecraftButton);
+		addToMainWindow(mainWindow, overrideMenu);
 
 		Scene scene = createScene(mainWindow, primaryStage);
 		primaryStage.setScene(scene);
@@ -54,33 +51,28 @@ public final class MainWindow {
 
 	}
 
-	private static void createStartMinecraftButton(MainWindow mainWindow, AppConfig appConfig, ServerInfoService serverInfoService) throws
-			IOException {
-		StartMinecraftButton minecraftButton = FXUtil.createFXMLController(StartMinecraftButton.class, unused -> new StartMinecraftButton
-				(appConfig, serverInfoService));
+	private static void addToMainWindow(MainWindow mainWindow, OverrideMenu overrideMenuController) {
+		mainWindow.overrideMenu.getChildren().add(overrideMenuController.toNodeRepresentation());
+	}
+
+	private static void addToMainWindow(MainWindow mainWindow, StartMinecraftButton minecraftButton) {
 		mainWindow.addMenuButton(minecraftButton.toNodeRepresentation());
 	}
 
-	private static void createServerButton(MainWindow mainWindow, ServerInfoService serverInfoService, LocalServerService serverRunner) throws
-			IOException {
-		ServerButton serverButton = FXUtil.createFXMLController(ServerButton.class, unused -> new ServerButton(serverInfoService, serverRunner));
+	private static void addToMainWindow(MainWindow mainWindow, ServerButton serverButton) {
 		mainWindow.addMenuButton(serverButton.toNodeRepresentation());
 	}
 
-	private static void createServerStatusDisplay(MainWindow mainWindow, ServerInfoService serverInfoService) throws IOException {
-		ServerStatusDisplay serverStatusDisplay =
-				FXUtil.createFXMLController(ServerStatusDisplay.class, unused -> new ServerStatusDisplay(serverInfoService));
-		mainWindow.setServerStatusDisplay(serverStatusDisplay);
+	private static void addToMainWindow(MainWindow mainWindow, ServerStatusDisplay serverStatusDisplay) {
+		mainWindow.topBar.add(serverStatusDisplay.toNodeRepresentation(), 0, 0);
 	}
 
-	private static void createUpdateDisplay(MainWindow mainWindow, AppConfig appConfig, UpdateChecker updateChecker) throws IOException {
-		UpdateDisplay updateDisplay = FXUtil.createFXMLController(UpdateDisplay.class, unused -> new UpdateDisplay(appConfig, updateChecker));
-		mainWindow.setUpdateChecker(updateDisplay);
+	private static void addToMainWindow(MainWindow mainWindow, UpdateDisplay updateDisplay) {
+		mainWindow.topBar.add(updateDisplay.toNodeRepresentation(), 1, 0);
 	}
 
-	private static void createConsoleView(MainWindow mainWindow, LocalConsole console) throws IOException {
-		ConsoleView consoleView = FXUtil.createFXMLController(ConsoleView.class, unused -> new ConsoleView(console));
-		mainWindow.setConsole(consoleView);
+	private static void addToMainWindow(MainWindow mainWindow, ConsoleView consoleView) {
+		mainWindow.root.setCenter(consoleView.toNodeRepresentation());
 	}
 
 	private static void setDimensions(Stage primaryStage) {
@@ -104,18 +96,6 @@ public final class MainWindow {
 
 	private void addMenuButton(Node node) {
 		menu.getChildren().add(node);
-	}
-
-	private void setServerStatusDisplay(ServerStatusDisplay serverStatusDisplay) {
-		topBar.add(serverStatusDisplay.toNodeRepresentation(), 0, 0);
-	}
-
-	private void setUpdateChecker(UpdateDisplay updateChecker) {
-		topBar.add(updateChecker.toNodeRepresentation(), 1, 0);
-	}
-
-	private void setConsole(ConsoleView consoleView) throws IOException {
-		root.setCenter(consoleView.toNodeRepresentation());
 	}
 
 }

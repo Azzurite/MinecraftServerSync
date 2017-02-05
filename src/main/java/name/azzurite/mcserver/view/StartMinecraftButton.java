@@ -7,7 +7,6 @@ import java.util.Optional;
 
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
-import javafx.scene.Node;
 import name.azzurite.mcserver.config.AppConfig;
 import name.azzurite.mcserver.minecraft.ServerList;
 import name.azzurite.mcserver.sync.ServerInfo;
@@ -16,15 +15,13 @@ import name.azzurite.mcserver.util.LogUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class StartMinecraftButton implements NodeRepresentation {
+public class StartMinecraftButton extends WithRootFXMLNode {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(StartMinecraftButton.class);
 
 	private final AppConfig appConfig;
 	private final ServerInfoService serverInfoService;
 
-	@FXML
-	private Node root;
 
 	public StartMinecraftButton(AppConfig appConfig, ServerInfoService serverInfoService) {
 		this.appConfig = appConfig;
@@ -57,8 +54,4 @@ public class StartMinecraftButton implements NodeRepresentation {
 		}
 	}
 
-	@Override
-	public Node toNodeRepresentation() {
-		return root;
-	}
 }

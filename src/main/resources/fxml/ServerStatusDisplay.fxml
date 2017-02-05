@@ -10,7 +10,7 @@
 <HBox fx:id="root" alignment="CENTER_LEFT" spacing="10.0" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1" fx:controller="name.azzurite.mcserver.view.ServerStatusDisplay">
    <children>
       <Label text="Server status:" />
-      <Label fx:id="serverStatusLabel" text="Not yet determined" />
+      <Label fx:id="serverStatusLabel" text="Status not yet determined" />
       <Button mnemonicParsing="false" onAction="#updateServerStatus" text="Update" />
    </children>
 </HBox>

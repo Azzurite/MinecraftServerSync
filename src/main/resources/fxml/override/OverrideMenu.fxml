@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox fx:id="overrideMenu" alignment="TOP_CENTER" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1" fx:controller="name.azzurite.mcserver.view.override.OverrideMenu">
+   <children>
+      <Label fx:id="noOverrides" text="No overrides&#10;possible right now." textAlignment="CENTER" />
+   </children>
+</VBox>

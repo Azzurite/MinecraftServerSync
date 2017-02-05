@@ -7,7 +7,6 @@ import java.net.URISyntaxException;
 
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
-import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
@@ -18,7 +17,7 @@ import name.azzurite.mcserver.util.AsyncUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class UpdateDisplay implements NodeRepresentation {
+public class UpdateDisplay extends WithRootFXMLNode {
 
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(UpdateDisplay.class);
@@ -31,9 +30,6 @@ public class UpdateDisplay implements NodeRepresentation {
 
 	private final AppConfig appConfig;
 
-
-	@FXML
-	private HBox root;
 
 	@FXML
 	private StackPane updatesPane;
@@ -103,9 +99,4 @@ public class UpdateDisplay implements NodeRepresentation {
 		currentVersion.setText(appConfig.getAppVersion().toString());
 	}
 
-
-	@Override
-	public Node toNodeRepresentation() {
-		return root;
-	}
 }
