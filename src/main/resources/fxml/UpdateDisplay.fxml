@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import java.lang.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.shape.*?>
+<?import javafx.scene.text.*?>
+<?import javafx.scene.control.Hyperlink?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.shape.Circle?>
+<?import javafx.scene.text.Font?>
+
+<HBox fx:id="root" spacing="10.0" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1" fx:controller="name.azzurite.mcserver.view.UpdateDisplay">
+   <children>
+      <StackPane fx:id="updatesPane">
+         <children>
+            <HBox fx:id="newVersion" alignment="CENTER_RIGHT">
+               <children>
+                  <Label text="New version available!" textFill="RED" wrapText="true">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <Hyperlink onAction="#onUpdateClicked" text="Update now!" textFill="#3553ff" wrapText="true">
+                     <font>
+                        <Font name="System Bold" size="14.0" />
+                     </font>
+                  </Hyperlink>
+                  <StackPane fx:id="tooltipArea">
+                     <children>
+                        <Circle fill="DODGERBLUE" radius="10.0" stroke="BLACK" strokeType="INSIDE" />
+                        <Label alignment="CENTER" contentDisplay="CENTER" prefHeight="20.0" prefWidth="20.0" text="?" textFill="WHITE" StackPane.alignment="CENTER">
+                           <font>
+                              <Font name="System Bold" size="14.0" />
+                           </font>
+                        </Label>
+                     </children>
+                  </StackPane>
+               </children>
+            </HBox>
+            <HBox fx:id="checkFailed" alignment="CENTER_RIGHT" visible="true">
+               <children>
+                  <Label text="Error while checking for updates!" textFill="RED">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <Hyperlink onAction="#onUpdateClicked" text="Check manually." textFill="#3553ff" wrapText="true">
+                     <font>
+                        <Font name="System Bold" size="14.0" />
+                     </font>
+                  </Hyperlink>
+               </children>
+            </HBox>
+         </children>
+      </StackPane>
+      <HBox alignment="CENTER_RIGHT">
+         <children>
+            <Label text="Current version: v" />
+            <Label fx:id="currentVersion" text="X.X.X" />
+         </children>
+      </HBox>
+   </children>
+</HBox>

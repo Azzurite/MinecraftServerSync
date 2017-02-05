@@ -67,6 +67,17 @@ public final class LambdaExceptionUtil {
 		};
 	}
 
+	public static <E extends Exception> Runnable rethrow(
+			Runnable_WithExceptions<E> runnable) {
+		return () -> {
+			try {
+				runnable.run();
+			} catch (Exception exception) {
+				throwAsUnchecked(exception);
+			}
+		};
+	}
+
 	@SuppressWarnings("unchecked")
 	private static <E extends Throwable> void throwAsUnchecked(Exception exception) throws E { throw (E) exception; }
 

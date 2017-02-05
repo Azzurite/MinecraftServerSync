@@ -32,7 +32,6 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
-import org.apache.commons.net.ftp.FTPConnectionClosedException;
 import org.apache.commons.net.ftp.FTPFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +57,7 @@ public class FTPSyncClient implements SyncClient {
 
 	private final AppConfig appConfig;
 
-	private final ExecutorService executor = Executors.newFixedThreadPool(10);
+	private final ExecutorService executor = Executors.newFixedThreadPool(1);
 
 	private final FTPTransferProgressListener progressListener;
 
@@ -136,39 +135,42 @@ public class FTPSyncClient implements SyncClient {
 		if (ftpClient.isConnected()) {
 			return;
 		}
-		LOGGER.debug("Connecting...");
+		LOGGER.info("Connecting to FTP server...");
 
 		try {
-			AsyncUtil.getResult(retry(() -> {
-				String hostName = appConfig.getFtpHostName().orElseThrow(() -> createMissingConfigEx("ftp host name"));
-				String port = appConfig.getFtpPort().orElseThrow(() -> createMissingConfigEx("ftp port"));
-				ftpClient.connect(hostName, Integer.valueOf(port));
-				logFtpCommand(ftpClient, "tryConnect", hostName, port);
+			String hostName = appConfig.getFtpHostName().orElseThrow(() -> createMissingConfigEx("ftp host name"));
+			String port = appConfig.getFtpPort().orElseThrow(() -> createMissingConfigEx("ftp port"));
+			ftpClient.connect(hostName, Integer.valueOf(port));
+			logFtpCommand(ftpClient, "tryConnect", hostName, port);
 
-				ftpClient.enterLocalPassiveMode();
-				logFtpCommand(ftpClient, "enterLocalPassiveMode");
+			ftpClient.enterLocalPassiveMode();
+			logFtpCommand(ftpClient, "enterLocalPassiveMode");
 
-				Optional<String> userName = appConfig.getFtpUserName();
-				Optional<String> password = appConfig.getFtpPassword();
-				if (userName.isPresent() && password.isPresent()) {
-					ftpClient.login(userName.get(), password.get());
-					logFtpCommand(ftpClient, "login", userName.get(), password.get());
+			Optional<String> userName = appConfig.getFtpUserName();
+			Optional<String> password = appConfig.getFtpPassword();
+			if (userName.isPresent() && password.isPresent()) {
+				boolean loginSuccessful = ftpClient.login(userName.get(), password.get());
+				logFtpCommand(ftpClient, "login", userName.get(), password.get());
+				if (loginSuccessful) {
+					LOGGER.debug("FTP login successful");
 				} else {
-					LOGGER.warn("No authentication for ftp set!");
+					LOGGER.debug("FTP login failed");
 				}
+			} else {
+				LOGGER.warn("No authentication for ftp set!");
+			}
 
-				ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
-				logFtpCommand(ftpClient, "setFileType");
+			ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+			logFtpCommand(ftpClient, "setFileType");
 
-				String baseDirectory =
-						appConfig.getFtpBaseDirectory().orElseThrow(() -> createMissingConfigEx("ftp base directory"));
-				ftpClient.changeWorkingDirectory(baseDirectory);
-				logFtpCommand(ftpClient, "changeWorkingDirectory", baseDirectory);
-			}, () -> {
-				ftpClient.disconnect();
-			}));
-		} catch (ExecutionException e) {
-			new FTPException(e);
+			String baseDirectory =
+					appConfig.getFtpBaseDirectory().orElseThrow(() -> createMissingConfigEx("ftp base directory"));
+			ftpClient.changeWorkingDirectory(baseDirectory);
+			logFtpCommand(ftpClient, "changeWorkingDirectory", baseDirectory);
+
+			LOGGER.info("Connected to FTP server.");
+		} catch (IOException e) {
+			throw new FTPException(e);
 		}
 	}
 
@@ -503,7 +505,7 @@ public class FTPSyncClient implements SyncClient {
 		return fileMap;
 	}
 
-	private <R> Future<R> retry(FTPAction<R> action, FTPVoidAction onFail) {
+	private <R> Future<R> retry(FTPAction<R> action) {
 		return executor.submit(() -> {
 			for (int i = 1; i <= MAX_RETRIES; ++i) {
 				try {
@@ -511,64 +513,42 @@ public class FTPSyncClient implements SyncClient {
 						LOGGER.debug("Trying action again after failure...");
 					}
 					return action.perform();
-				} catch (FTPConnectionClosedException e) {
-					LOGGER.debug("Connection lost, reconnecting...");
+				} catch (IOException e) {
+					LOGGER.warn("Error during FTP action: {}", e.getMessage());
 					LogUtil.stacktrace(LOGGER, e);
 					try {
 						ftpClient.disconnect();
-					} catch (IOException ignore) {
+					} catch (IOException e1) {
+						LOGGER.warn("Error while disconnecting: {}", e1.getMessage());
+						LogUtil.stacktrace(LOGGER, e1);
 					}
 
 					tryConnect();
-				} catch (IOException e) {
-					LOGGER.warn("Error during FTP action");
-					LogUtil.stacktrace(LOGGER, e);
-
-					if (onFail != null) {
-						try {
-							onFail.perform();
-						} catch (IOException e1) {
-							LOGGER.warn("Error while performing onFail action");
-							LogUtil.stacktrace(LOGGER, e1);
-						}
-					}
 				}
 			}
+
+			LOGGER.error("Could not perform FTP action, 3 retries all failed.");
 			throw new FTPException("Could not perform FTP action.");
 		});
 	}
 
-	private Future<Void> retry(FTPVoidAction action, FTPVoidAction onFail) {
+	private Future<Void> retry(FTPVoidAction action) {
 		return retry(() -> {
-			action.perform();
-			return (Void) null;
-		}, onFail);
-	}
-
-	private <R> Future<R> perform(FTPAction<R> action, FTPVoidAction onFail) {
-		tryConnect();
-
-		return retry(action, onFail);
-	}
-
-	private Future<Void> perform(FTPVoidAction action, FTPVoidAction onFail) {
-		tryConnect();
-
-		return retry(() -> {
-			action.perform();
-			return (Void) null;
-		}, onFail);
-	}
-
-	private <R> Future<R> perform(FTPAction<R> action) {
-		return perform(action, null);
-	}
-
-	private <R> Future<Void> perform(FTPVoidAction action) {
-		return perform(() -> {
 			action.perform();
 			return (Void) null;
 		});
+	}
+
+	private <R> Future<R> perform(FTPAction<R> action) {
+		tryConnect();
+
+		return retry(action);
+	}
+
+	private Future<Void> perform(FTPVoidAction action) {
+		tryConnect();
+
+		return retry(action);
 	}
 
 	private long getFileSize(String fileName) {
