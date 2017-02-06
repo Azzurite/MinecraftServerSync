@@ -63,8 +63,7 @@ public class ServerInfoService extends Service<ServerInfo> {
 		@Override
 		protected ServerInfo call() throws ExecutionException {
 			if (localServerStatus != SyncingLocalServer.SyncingLocalServerStatus.OFFLINE) {
-				String ip = localServerStatus == SyncingLocalServer.SyncingLocalServerStatus.RUNNING ? "localhost" : null;
-				return new ServerInfo(ServerStatus.fromLocalServerStatus(localServerStatus), ip);
+				return new ServerInfo(ServerStatus.fromLocalServerStatus(localServerStatus), "localhost");
 			}
 
 			Optional<String> onlineServerIp = sync.getServerIp();
