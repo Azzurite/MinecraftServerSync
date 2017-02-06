@@ -75,11 +75,11 @@ public class SyncingLocalServer implements Server {
 		if (status.get() == SyncingLocalServerStatus.OFFLINE || status.get() == SyncingLocalServerStatus.SAVING_FILES) {
 			return;
 		}
+		status.set(SyncingLocalServerStatus.SAVING_FILES);
 
 		localServer.close();
 
 		try {
-			status.set(SyncingLocalServerStatus.SAVING_FILES);
 			sync.saveFiles();
 			sync.deleteServerIp();
 		} catch (ExecutionException e) {

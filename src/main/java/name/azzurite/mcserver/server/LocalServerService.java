@@ -145,7 +145,6 @@ public class LocalServerService extends Service<Void> {
 					}
 				}
 
-				console.send("stop");
 				localServer.close();
 			} catch (IOException | ExecutionException e) {
 				LOGGER.error("Error while running server: {}", e.getMessage());
