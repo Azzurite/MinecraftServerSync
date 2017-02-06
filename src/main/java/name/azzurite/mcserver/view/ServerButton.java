@@ -22,14 +22,39 @@ public class ServerButton implements NodeRepresentation {
 
 	@FXML
 	private Button serverButton;
+	private boolean buttonClicked;
 
 	public ServerButton(ServerInfoService serverInfoService, LocalServerService serverService) {
 		this.serverInfoService = serverInfoService;
 		this.serverService = serverService;
-		serverInfoService.addOnSucceeded(this::handleServerStatusChange);
+		serverInfoService.addOnSucceeded(this::updateButtonState);
+		serverInfoService.addOnSucceeded(this::performAction);
 	}
 
-	private void handleServerStatusChange(WorkerStateEvent event) {
+	private void performAction(WorkerStateEvent event) {
+		if (!buttonClicked) {
+			return;
+		}
+		buttonClicked = false;
+
+		ServerInfo serverInfo = (ServerInfo) event.getSource().getValue();
+
+		switch (serverInfo.getServerStatus()) {
+			case LOCALLY_ONLINE:
+				serverService.requestShutdown();
+				break;
+			case OFFLINE:
+				startServer();
+				break;
+			case REMOTE_ONLINE:
+			case REMOTE_UPLOADING:
+			case LOCALLY_UPLOADING:
+			case LOCALLY_DOWNLOADING:
+				// do nothing
+		}
+	}
+
+	private void updateButtonState(WorkerStateEvent event) {
 		ServerInfo serverInfo = (ServerInfo) event.getSource().getValue();
 
 		switch (serverInfo.getServerStatus()) {
@@ -58,22 +83,8 @@ public class ServerButton implements NodeRepresentation {
 
 	@FXML
 	private void serverButtonClicked(ActionEvent event) throws IOException, ExecutionException {
-
-		ServerInfo serverInfo = serverInfoService.getValue();
-		switch (serverInfo.getServerStatus()) {
-			case LOCALLY_ONLINE:
-				serverService.requestShutdown();
-				break;
-			case OFFLINE:
-				startServer();
-				break;
-			case REMOTE_ONLINE:
-			case REMOTE_UPLOADING:
-			case LOCALLY_UPLOADING:
-			case LOCALLY_DOWNLOADING:
-				// do nothing
-
-		}
+		buttonClicked = true;
+		serverInfoService.recheckServerStatus();
 	}
 
 	private void startServer() {

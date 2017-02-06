@@ -33,16 +33,19 @@ public class SyncingLocalServer implements Server {
 
 	private final List<Runnable> onCloseCallbacks = new ArrayList<>();
 
-	private ObjectProperty<SyncingLocalServerStatus> status = new SimpleObjectProperty<>(SyncingLocalServerStatus.RETRIEVING_FILES);
+	private ObjectProperty<SyncingLocalServerStatus> status = new SimpleObjectProperty<>(SyncingLocalServerStatus.OFFLINE);
 
 	public SyncingLocalServer(AppConfig appConfig, ServerSynchronizer sync, LocalConsole console) throws IOException, ExecutionException {
 		this.appConfig = appConfig;
 		this.sync = sync;
 		this.console = console;
 
-		localServer = createLocalServer();
-
-		localServer.addOnCloseCallback(rethrow(this::close));
+		if (sync.getServerIp().isPresent()) {
+			localServer = null;
+		} else {
+			localServer = createLocalServer();
+			localServer.addOnCloseCallback(rethrow(this::close));
+		}
 	}
 
 	private static String retrieveExternalIP() throws MalformedURLException {
@@ -92,8 +95,9 @@ public class SyncingLocalServer implements Server {
 
 	@SuppressWarnings("UseOfSystemOutOrSystemErr")
 	private LocalServer createLocalServer() throws IOException, ExecutionException {
-		sync.retrieveFiles();
+		status.set(SyncingLocalServerStatus.RETRIEVING_FILES);
 		sync.setServerIp(retrieveExternalIP());
+		sync.retrieveFiles();
 
 		status.set(SyncingLocalServerStatus.RUNNING);
 
