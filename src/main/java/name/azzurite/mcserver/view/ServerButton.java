@@ -7,14 +7,16 @@ import javafx.concurrent.WorkerStateEvent;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import name.azzurite.mcserver.server.LocalServerService;
 import name.azzurite.mcserver.sync.ServerInfo;
 import name.azzurite.mcserver.sync.ServerInfoService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ServerButton implements NodeRepresentation {
 
+	private static final Logger LOGGER = LoggerFactory.getLogger(ServerButton.class);
 	private final ServerInfoService serverInfoService;
 	private final LocalServerService serverService;
 
@@ -25,52 +27,63 @@ public class ServerButton implements NodeRepresentation {
 		this.serverInfoService = serverInfoService;
 		this.serverService = serverService;
 		serverInfoService.addOnSucceeded(this::handleServerStatusChange);
-
-		serverService.setOnFailed((e) -> {
-			Alert alert = new Alert(Alert.AlertType.ERROR);
-			alert.setHeaderText("Error while starting server");
-			alert.setContentText(serverService.getException().getMessage());
-			alert.show();
-			serverService.reset();
-		});
-
 	}
 
 	private void handleServerStatusChange(WorkerStateEvent event) {
 		ServerInfo serverInfo = (ServerInfo) event.getSource().getValue();
 
 		switch (serverInfo.getServerStatus()) {
-			case ONLINE:
+			case REMOTE_ONLINE:
 				serverButton.setDisable(true);
 				break;
 			case OFFLINE:
 				serverButton.setText("Start server");
 				serverButton.setDisable(false);
 				break;
-			case UPLOAD_IN_PROGRESS:
+			case REMOTE_UPLOADING:
 				serverButton.setDisable(true);
 				break;
-			case STARTED_LOCALLY:
+			case LOCALLY_ONLINE:
 				serverButton.setText("Stop server");
 				serverButton.setDisable(false);
+				break;
+			case LOCALLY_UPLOADING:
+				serverButton.setDisable(true);
+				break;
+			case LOCALLY_DOWNLOADING:
+				serverButton.setDisable(true);
 				break;
 		}
 	}
 
 	@FXML
 	private void serverButtonClicked(ActionEvent event) throws IOException, ExecutionException {
+
 		ServerInfo serverInfo = serverInfoService.getValue();
 		switch (serverInfo.getServerStatus()) {
-			case STARTED_LOCALLY:
-				serverService.cancel();
+			case LOCALLY_ONLINE:
+				serverService.requestShutdown();
 				break;
 			case OFFLINE:
-				serverService.start();
+				startServer();
 				break;
-			case ONLINE:
-			case UPLOAD_IN_PROGRESS:
+			case REMOTE_ONLINE:
+			case REMOTE_UPLOADING:
+			case LOCALLY_UPLOADING:
+			case LOCALLY_DOWNLOADING:
 				// do nothing
+
 		}
+	}
+
+	private void startServer() {
+		if (serverService.isRunning()) {
+			LOGGER.info("Still waiting for other action...");
+			return;
+		}
+
+		serverService.reset();
+		serverService.start();
 	}
 
 	@Override

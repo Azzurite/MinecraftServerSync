@@ -28,10 +28,12 @@ public final class FXUtil {
 		return fxmlLoader.getController();
 	}
 
+	@SuppressWarnings("DynamicRegexReplaceableByCompiledPattern") // performance impact negligible
 	private static URL createControllerFXMLClasspathURL(Class<?> controllerClass) {
 		String cleanedControllerPath = controllerClass.getName().replace(ROOT_VIEW_PACKAGE.getName() + '.', "");
+		String controllerPathWithSlashes = cleanedControllerPath.replaceAll("\\.", "/");
 
-		String controllerFXMLPath = "fxml/" + cleanedControllerPath + ".fxml";
+		String controllerFXMLPath = "fxml/" + controllerPathWithSlashes + ".fxml";
 		URL resource = CLASS_LOADER.getResource(controllerFXMLPath);
 		if (resource == null) {
 			throw new IllegalStateException("Could not find fxml " + controllerFXMLPath);

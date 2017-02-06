@@ -18,15 +18,19 @@
           <RowConstraints minHeight="10.0" vgrow="SOMETIMES" />
         </rowConstraints>
          <children>
-            <TitledPane animated="false" expanded="false" prefWidth="150.0" text="Manual override" visible="false" GridPane.rowIndex="1">
+            <TitledPane animated="false" expanded="false" prefWidth="170.0" text="Manual override" GridPane.rowIndex="1">
                <content>
-                  <VBox fx:id="overrideMenu" spacing="4.0">
+                  <VBox alignment="TOP_CENTER" spacing="4.0">
                      <children>
-                        <Label text="Warning: &#10;Only use these if you&#10;know what you're doing!" textAlignment="CENTER" textFill="RED" wrapText="true" />
+                        <Label text="Warning: &#10;Only use these if you&#10;know what you're doing!" textAlignment="CENTER" textFill="RED" wrapText="true">
+                           <VBox.margin>
+                              <Insets top="8.0" />
+                           </VBox.margin></Label>
+                        <VBox fx:id="overrideMenu" />
                      </children></VBox>
                </content>
             </TitledPane>
-            <VBox fx:id="menu" prefWidth="150.0" spacing="4.0" />
+            <VBox fx:id="menu" prefWidth="170.0" spacing="4.0" />
          </children>
       </GridPane>
    </left>

@@ -3,11 +3,13 @@ package name.azzurite.mcserver.sync;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
+import javafx.application.Platform;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
 import javafx.concurrent.WorkerStateEvent;
 import javafx.event.EventHandler;
 import name.azzurite.mcserver.server.LocalServerService;
+import name.azzurite.mcserver.server.SyncingLocalServer;
 import name.azzurite.mcserver.util.EventHandlerChain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,15 +29,15 @@ public class ServerInfoService extends Service<ServerInfo> {
 		setOnSucceeded(succeededChain);
 
 		this.serverService = serverService;
-		serverService.stateProperty().addListener((event) -> {
-			recheckServerStatus();
+		serverService.localServerStatusProperty().addListener((event) -> {
+			Platform.runLater(this::recheckServerStatus);
 		});
 	}
 
 	@Override
 	protected Task<ServerInfo> createTask() {
-		boolean localServerRunning = serverService.isRunning() || serverService.getState() == State.CANCELLED;
-		return new ServerInfoTask(localServerRunning);
+		SyncingLocalServer.SyncingLocalServerStatus localServerStatus = serverService.getLocalServerStatus();
+		return new ServerInfoTask(localServerStatus);
 	}
 
 	public void addOnSucceeded(EventHandler<WorkerStateEvent> eventHandler) {
@@ -52,23 +54,24 @@ public class ServerInfoService extends Service<ServerInfo> {
 
 	private class ServerInfoTask extends Task<ServerInfo> {
 
-		private final boolean localServerRunning;
+		private final SyncingLocalServer.SyncingLocalServerStatus localServerStatus;
 
-		public ServerInfoTask(boolean localServerRunning) {
-			this.localServerRunning = localServerRunning;
+		ServerInfoTask(SyncingLocalServer.SyncingLocalServerStatus localServerStatus) {
+			this.localServerStatus = localServerStatus;
 		}
 
 		@Override
 		protected ServerInfo call() throws ExecutionException {
-			if (localServerRunning) {
-				return new ServerInfo(ServerStatus.STARTED_LOCALLY, "localhost");
+			if (localServerStatus != SyncingLocalServer.SyncingLocalServerStatus.OFFLINE) {
+				String ip = localServerStatus == SyncingLocalServer.SyncingLocalServerStatus.RUNNING ? "localhost" : null;
+				return new ServerInfo(ServerStatus.fromLocalServerStatus(localServerStatus), ip);
 			}
 
 			Optional<String> onlineServerIp = sync.getServerIp();
 			if (onlineServerIp.isPresent()) {
-				return new ServerInfo(ServerStatus.ONLINE, onlineServerIp.get());
+				return new ServerInfo(ServerStatus.REMOTE_ONLINE, onlineServerIp.get());
 			} else if (sync.isUploadInProgress()) {
-				return new ServerInfo(ServerStatus.UPLOAD_IN_PROGRESS);
+				return new ServerInfo(ServerStatus.REMOTE_UPLOADING);
 			} else {
 				return new ServerInfo(ServerStatus.OFFLINE);
 			}

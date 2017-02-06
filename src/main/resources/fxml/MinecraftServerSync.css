@@ -8,6 +8,10 @@
     -fx-border-width: 0 1 0 0;
 }
 
+.titled-pane > .content > VBox {
+    -fx-padding: 0;
+}
+
 #overrideMenu, #menu {
     -fx-padding: 5px;
 }
