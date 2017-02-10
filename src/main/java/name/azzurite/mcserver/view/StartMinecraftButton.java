@@ -46,7 +46,7 @@ public class StartMinecraftButton extends WithRootFXMLNode {
 		Optional<String> minecraftLauncherPath = appConfig.getMinecraftLauncherPath();
 		if (minecraftLauncherPath.isPresent()) {
 			Path path = Paths.get(minecraftLauncherPath.get());
-			ProcessBuilder processBuilder = new ProcessBuilder(path.toString());
+			ProcessBuilder processBuilder = new ProcessBuilder("cmd", "/C", "start", "\"\"", path.toString());
 			processBuilder.directory(path.getParent().toFile());
 			LOGGER.info("Starting Minecraft Launcher with system command: {}",
 					LogUtil.getCommandString(processBuilder));
